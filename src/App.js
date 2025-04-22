@@ -13,7 +13,8 @@ function App() {
     bride_name: "",
     email: "",
     phone: "",
-    wedding_date: "",
+    wedding_date: "", // 這裡儲存的是 datetime-local 的字串
+    wedding_location: "", // 新增地點欄位到 state
     form_link: "",
   });
 
@@ -49,12 +50,14 @@ function App() {
       errors.email = "請輸入有效的電子郵件地址";
     }
     if (!formData.phone.trim()) errors.phone = "請填寫聯絡電話";
-    if (!formData.wedding_date) errors.wedding_date = "請選擇婚禮日期";
+    if (!formData.wedding_date) errors.wedding_date = "請選擇婚禮日期和時間"; // 更新錯誤訊息
     if (!formData.form_link.trim()) {
       errors.form_link = "請填寫 Google 試算表連結";
     } else if (!validator.isURL(formData.form_link, { require_protocol: true })) { // 簡單的 URL 格式驗證，要求包含協定
       errors.form_link = "請輸入有效的連結 (包含 http:// 或 https://)";
     }
+    // wedding_location 目前不設定為必填，如果需要請取消註解下面這行
+    // if (!formData.wedding_location.trim()) errors.wedding_location = "請填寫婚禮地點";
 
 
     setFormErrors(errors);
@@ -85,6 +88,7 @@ function App() {
       const res = await fetch("http://localhost:5000/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // 發送包含 wedding_location 的 formData
         body: JSON.stringify(formData),
       });
 
@@ -117,6 +121,7 @@ function App() {
         email: "",
         phone: "",
         wedding_date: "",
+        wedding_location: "", // 清空地點欄位
         form_link: "",
       });
       setFormErrors({}); // 清空錯誤訊息
@@ -148,26 +153,30 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-200 py-8 px-4">
+    // 外層容器使用更沉穩的背景色
+    <div className="min-h-screen bg-slate-100 py-8 px-4">
       <div className="max-w-4xl mx-auto bg-white shadow-lg rounded-lg p-8">
-        <h1 className="text-4xl font-semibold mb-8 text-center text-gray-700">
-          小高婚慶後台管理系統
-        </h1>
-
-        <div className="flex justify-end mb-4">
+        {/* 新增 flex 容器來放置標題和按鈕 */}
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-semibold text-slate-700">
+            小高婚慶後台管理系統
+          </h1>
           <button
             onClick={() => setShowForm(true)}
-            className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+            // 調整按鈕顏色和樣式以符合沉穩風格
+            className="bg-sky-700 text-white px-4 py-2 rounded-md shadow hover:bg-sky-800 transition-colors duration-200"
           >
             ➕ 新增客戶
           </button>
         </div>
 
+
         {showForm && (
           <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-xl transform transition-all duration-300 scale-100">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-700">新增客戶資訊</h2>
+            {/* 調整表單容器樣式 */}
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-100">
+              <div className="flex justify-between items-center mb-4 border-b pb-2 border-slate-200">
+                <h2 className="text-xl font-bold text-slate-700">新增客戶資訊</h2>
                 {/* 關閉按鈕 */}
                 <button onClick={() => {
                   setShowForm(false);
@@ -178,9 +187,10 @@ function App() {
                     email: "",
                     phone: "",
                     wedding_date: "",
+                    wedding_location: "", // 清空地點欄位
                     form_link: "",
                   });
-                }} className="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                }} className="text-slate-500 hover:text-slate-700 text-2xl">&times;</button>
               </div>
               <div className="grid grid-cols-1 gap-4">
                 <div> {/* 為每個輸入框及其錯誤訊息建立一個 div */}
@@ -190,7 +200,8 @@ function App() {
                     value={formData.groom_name}
                     onChange={handleChange}
                     placeholder="新郎姓名"
-                    className={`border rounded p-2 w-full ${formErrors.groom_name ? 'border-red-500' : ''}`}
+                    // 調整輸入框樣式
+                    className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.groom_name ? 'border-red-500' : ''}`}
                   />
                   {formErrors.groom_name && <p className="text-red-500 text-sm mt-1">{formErrors.groom_name}</p>}
                 </div>
@@ -202,7 +213,8 @@ function App() {
                     value={formData.bride_name}
                     onChange={handleChange}
                     placeholder="新娘姓名"
-                    className={`border rounded p-2 w-full ${formErrors.bride_name ? 'border-red-500' : ''}`}
+                    // 調整輸入框樣式
+                    className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.bride_name ? 'border-red-500' : ''}`}
                   />
                   {formErrors.bride_name && <p className="text-red-500 text-sm mt-1">{formErrors.bride_name}</p>}
                 </div>
@@ -214,7 +226,8 @@ function App() {
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="聯絡信箱"
-                    className={`border rounded p-2 w-full ${formErrors.email ? 'border-red-500' : ''}`}
+                    // 調整輸入框樣式
+                    className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.email ? 'border-red-500' : ''}`}
                   />
                   {formErrors.email && <p className="text-red-500 text-sm mt-1">{formErrors.email}</p>}
                 </div>
@@ -226,7 +239,8 @@ function App() {
                     value={formData.phone}
                     onChange={handleChange}
                     placeholder="聯絡電話"
-                    className={`border rounded p-2 w-full ${formErrors.phone ? 'border-red-500' : ''}`}
+                    // 調整輸入框樣式
+                    className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.phone ? 'border-red-500' : ''}`}
                   />
                   {formErrors.phone && <p className="text-red-500 text-sm mt-1">{formErrors.phone}</p>}
                 </div>
@@ -237,10 +251,26 @@ function App() {
                     name="wedding_date"
                     value={formData.wedding_date}
                     onChange={handleChange}
-                    className={`border rounded p-2 w-full ${formErrors.wedding_date ? 'border-red-500' : ''}`}
+                    // 調整輸入框樣式
+                    className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.wedding_date ? 'border-red-500' : ''}`}
                   />
                   {formErrors.wedding_date && <p className="text-red-500 text-sm mt-1">{formErrors.wedding_date}</p>}
                 </div>
+
+                <div> {/* 新增地點輸入框 */}
+                  <input
+                    type="text"
+                    name="wedding_location"
+                    value={formData.wedding_location}
+                    onChange={handleChange}
+                    placeholder="婚禮地點"
+                    // 調整輸入框樣式
+                    className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.wedding_location ? 'border-red-500' : ''}`}
+                  />
+                  {/* 如果地點設定為必填，請取消註解下面這行 */}
+                  {/* {formErrors.wedding_location && <p className="text-red-500 text-sm mt-1">{formErrors.wedding_location}</p>} */}
+                </div>
+
 
                 <div>
                   <input
@@ -249,7 +279,8 @@ function App() {
                     value={formData.form_link}
                     onChange={handleChange}
                     placeholder="google 試算表連結"
-                    className={`border rounded p-2 w-full ${formErrors.form_link ? 'border-red-500' : ''}`}
+                    // 調整輸入框樣式
+                    className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.form_link ? 'border-red-500' : ''}`}
                   />
                   {formErrors.form_link && <p className="text-red-500 text-sm mt-1">{formErrors.form_link}</p>}
                 </div>
@@ -259,7 +290,8 @@ function App() {
                 <div className="flex gap-4 mt-2 justify-end">
                   <button
                     onClick={handleSubmit}
-                    className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50" // 禁用狀態下的樣式
+                    // 調整按鈕顏色和樣式
+                    className="bg-sky-700 text-white px-4 py-2 rounded-md shadow hover:bg-sky-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" // 禁用狀態下的樣式
                     disabled={isSubmitting} // 提交中時禁用按鈕
                   >
                     {isSubmitting ? '提交中...' : '確認新增'} {/* 根據狀態顯示不同文字 */}
@@ -274,10 +306,12 @@ function App() {
                         email: "",
                         phone: "",
                         wedding_date: "",
+                        wedding_location: "", // 清空地點欄位
                         form_link: "",
                       });
                     }}
-                    className="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500 disabled:opacity-50" // 禁用狀態下的樣式
+                    // 調整按鈕顏色和樣式
+                    className="bg-slate-500 text-white px-4 py-2 rounded-md shadow hover:bg-slate-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" // 禁用狀態下的樣式
                     disabled={isSubmitting} // 提交中時禁用按鈕
                   >
                     取消
@@ -289,25 +323,27 @@ function App() {
         )}
 
 
-        <table className="w-full text-center border-collapse">
-          <thead className="bg-gray-300 text-gray-700">
+        {/* 調整表格標題樣式 */}
+        <table className="w-full text-center border-collapse table-auto"> {/* 增加 table-auto 使表格寬度自適應 */}
+          <thead className="bg-slate-300 text-slate-700">
             <tr>
-              <th className="py-3 px-4 border-b border-gray-300 text-lg">新郎</th>
-              <th className="py-3 px-4 border-b border-gray-300 text-lg">新娘</th>
-              <th className="py-3 px-4 border-b border-gray-300 text-lg">聯絡方式</th>
-              <th className="py-3 px-4 border-b border-gray-300 text-lg">操作</th>
+              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新郎</th>
+              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新娘</th>
+              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">聯絡方式</th>
+              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">操作</th>
             </tr>
           </thead>
           <tbody>
             {customers.map((c) => (
-              <tr key={c.id} className="hover:bg-gray-100">
-                <td className="py-3 px-4 border-b border-gray-300 text-lg">{c.groom_name}</td>
-                <td className="py-3 px-4 border-b border-gray-300 text-lg">{c.bride_name}</td>
-                <td className="py-3 px-4 border-b border-gray-300 text-lg">{c.email}</td>
-                <td className="py-3 px-4 border-b border-gray-300 text-lg">
+              <tr key={c.id} className="hover:bg-slate-50"> {/* 調整 hover 效果顏色 */}
+                <td className="py-3 px-4 border-b border-slate-200 text-lg">{c.groom_name}</td>
+                <td className="py-3 px-4 border-b border-slate-200 text-lg">{c.bride_name}</td>
+                <td className="py-3 px-4 border-b border-slate-200 text-lg">{c.email}</td>
+                <td className="py-3 px-4 border-b border-slate-200 text-lg">
                   <Link
                     to={`/customer/${c.id}`}
-                    className="inline-block bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition duration-300 ease-in-out"
+                    // 調整連結按鈕顏色和樣式
+                    className="inline-block bg-sky-600 text-white px-3 py-1 rounded hover:bg-sky-700 transition duration-300 ease-in-out"
                   >
                     查看
                   </Link>
@@ -318,7 +354,7 @@ function App() {
         </table>
 
         {customers.length === 0 && !loading && (
-          <p className="text-center text-gray-500 mt-8 text-lg">目前沒有客戶資料。</p>
+          <p className="text-center text-slate-500 mt-8 text-lg">目前沒有客戶資料。</p>
         )}
       </div>
     </div>

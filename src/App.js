@@ -166,18 +166,16 @@ function App() {
             // 調整按鈕顏色和樣式以符合沉穩風格
             className="bg-sky-700 text-white px-4 py-2 rounded-md shadow hover:bg-sky-800 transition-colors duration-200"
           >
-            ➕ 新增客戶
+            新增客戶
           </button>
         </div>
 
 
         {showForm && (
           <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-            {/* 調整表單容器樣式 */}
             <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-100">
               <div className="flex justify-between items-center mb-4 border-b pb-2 border-slate-200">
                 <h2 className="text-xl font-bold text-slate-700">新增客戶資訊</h2>
-                {/* 關閉按鈕 */}
                 <button onClick={() => {
                   setShowForm(false);
                   setFormErrors({}); // 關閉表單時清除錯誤訊息
@@ -193,7 +191,7 @@ function App() {
                 }} className="text-slate-500 hover:text-slate-700 text-2xl">&times;</button>
               </div>
               <div className="grid grid-cols-1 gap-4">
-                <div> {/* 為每個輸入框及其錯誤訊息建立一個 div */}
+                <div>
                   <input
                     type="text"
                     name="groom_name"
@@ -267,8 +265,7 @@ function App() {
                     // 調整輸入框樣式
                     className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.wedding_location ? 'border-red-500' : ''}`}
                   />
-                  {/* 如果地點設定為必填，請取消註解下面這行 */}
-                  {/* {formErrors.wedding_location && <p className="text-red-500 text-sm mt-1">{formErrors.wedding_location}</p>} */}
+                  {formErrors.wedding_location && <p className="text-red-500 text-sm mt-1">{formErrors.wedding_location}</p>}
                 </div>
 
 
@@ -294,7 +291,7 @@ function App() {
                     className="bg-sky-700 text-white px-4 py-2 rounded-md shadow hover:bg-sky-800 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" // 禁用狀態下的樣式
                     disabled={isSubmitting} // 提交中時禁用按鈕
                   >
-                    {isSubmitting ? '提交中...' : '確認新增'} {/* 根據狀態顯示不同文字 */}
+                    {isSubmitting ? '提交中...' : '確認新增'}
                   </button>
                   <button
                     onClick={() => {
@@ -323,35 +320,7 @@ function App() {
         )}
 
 
-        {/* 調整表格標題樣式 */}
-        <table className="w-full text-center border-collapse table-auto"> {/* 增加 table-auto 使表格寬度自適應 */}
-          <thead className="bg-slate-300 text-slate-700">
-            <tr>
-              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新郎</th>
-              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新娘</th>
-              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">聯絡方式</th>
-              <th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {customers.map((c) => (
-              <tr key={c.id} className="hover:bg-slate-50"> {/* 調整 hover 效果顏色 */}
-                <td className="py-3 px-4 border-b border-slate-200 text-lg">{c.groom_name}</td>
-                <td className="py-3 px-4 border-b border-slate-200 text-lg">{c.bride_name}</td>
-                <td className="py-3 px-4 border-b border-slate-200 text-lg">{c.email}</td>
-                <td className="py-3 px-4 border-b border-slate-200 text-lg">
-                  <Link
-                    to={`/customer/${c.id}`}
-                    // 調整連結按鈕顏色和樣式
-                    className="inline-block bg-sky-600 text-white px-3 py-1 rounded hover:bg-sky-700 transition duration-300 ease-in-out"
-                  >
-                    查看
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <table className="w-full text-center border-collapse table-auto"><thead className="bg-slate-300 text-slate-700"><tr><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新郎</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新娘</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">聯絡方式</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">操作</th></tr></thead><tbody>{customers.map((c) => (<tr key={c.id} className="hover:bg-slate-50"><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.groom_name}</td><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.bride_name}</td><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.email}</td><td className="py-3 px-4 border-b border-slate-200 text-lg"><Link to={`/customer/${c.id}`} className="inline-block bg-sky-600 text-white px-3 py-1 rounded hover:bg-sky-700 transition duration-300 ease-in-out">查看</Link></td></tr>))}</tbody></table>
 
         {customers.length === 0 && !loading && (
           <p className="text-center text-slate-500 mt-8 text-lg">目前沒有客戶資料。</p>

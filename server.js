@@ -69,7 +69,7 @@ app.get("/customers", (req, res) => {
     });
 });
 
-// 新增客戶資料 (修正日期時間處理，新增地點欄位接收，加強錯誤日誌)
+// 新增客戶資料
 app.post("/customers", (req, res) => {
     const {
         groom_name,
@@ -167,6 +167,7 @@ app.post("/customers", (req, res) => {
                 return res.status(400).json({ message: `資料格式錯誤：請檢查日期、時間或地點格式是否正確 (${err.sqlMessage})` });
             }
 
+
             return res.status(500).json({ message: "新增失敗，請稍後再試" });
         }
         // 返回新增的客戶資料，前端可以直接更新列表
@@ -232,24 +233,28 @@ app.get("/customers/:id/sheet-data", (req, res) => {
     );
 });
 
-// 從 Google Sheet 同步賓客資料到資料庫 (使用 Google Sheet 賓客 ID 進行同步)
+// 從 Google Sheet 同步賓客資料到資料庫 (使用 Google Sheet 賓客 ID 進行同步，只在資料不同時才更新，加強日誌)
 app.post("/sync-sheet-data/:id", async (req, res) => {
+    console.log(`[SYNC] 開始同步客戶 ID ${req.params.id} 的資料`);
     try {
         const { id } = req.params;
         // 簡單驗證 id 是否為數字
         if (!validator.isInt(id)) {
+            console.warn(`[SYNC] 客戶 ID ${id} 無效`);
             return res.status(400).json({ message: "無效的客戶 ID" });
         }
+        const customerId = parseInt(id);
 
 
-        pool.query("SELECT google_sheet_link FROM customers WHERE id = ?", [id], async (err, results) => {
+        pool.query("SELECT google_sheet_link FROM customers WHERE id = ?", [customerId], async (err, results) => {
             if (err) {
-                console.error("查詢客戶 Google Sheet 連結錯誤:", err);
+                console.error(`[SYNC] 查詢客戶 ${customerId} 的 Google Sheet 連結錯誤:`, err);
                 return res.status(500).json({ message: "伺服器錯誤，無法獲取客戶資訊" });
             }
 
 
             if (results.length === 0 || !results[0].google_sheet_link) {
+                console.warn(`[SYNC] 找不到客戶 ${customerId} 或其 Google Sheet 連結`);
                 return res.status(404).json({ message: "該客戶尚無 Google Sheet 連結" });
             }
 
@@ -258,17 +263,19 @@ app.post("/sync-sheet-data/:id", async (req, res) => {
             try {
                 const match = googleSheetLink.match(/spreadsheets\/d\/(.*?)\//);
                 if (!match || match.length < 2 || !match[1]) {
+                    console.warn(`[SYNC] 客戶 ${customerId} 的 Google Sheet 連結格式無效:`, googleSheetLink);
                     return res.status(400).json({ message: "無效的 Google Sheet 連結格式" });
                 }
                 sheetId = match[1];
+                console.log(`[SYNC] 客戶 ${customerId} 的 Google Sheet ID: ${sheetId}`);
             } catch (parseError) {
-                console.error("解析 Google Sheet 連結錯誤:", parseError);
+                console.error(`[SYNC] 解析 Google Sheet 連結 ${googleSheetLink} 錯誤:`, parseError);
                 return res.status(400).json({ message: "解析 Google Sheet 連結時發生錯誤" });
             }
 
             // 檢查 sheets 客戶端是否已初始化
             if (!sheets) {
-                console.error("Google Sheets API 客戶端未初始化");
+                console.error("[SYNC] Google Sheets API 客戶端未初始化");
                 return res.status(500).json({ message: "伺服器內部錯誤，Google Sheets API 無法使用" });
             }
 
@@ -278,14 +285,16 @@ app.post("/sync-sheet-data/:id", async (req, res) => {
                 // 讀取 Google Sheets 中各個欄位的資料 (假設從第二行開始是資料)
                 // 讀取 A 到 I 列，A 列是唯一的賓客 ID
                 const range = "工作表1!A2:I";
+                console.log(`[SYNC] 從 Google Sheet ${sheetId} 讀取範圍 ${range}`);
                 const response = await sheets.spreadsheets.values.get({
                     spreadsheetId: sheetId,
                     range: range,
                 });
                 sheetDataValues = response.data.values || [];
+                console.log(`[SYNC] 從 Google Sheet 讀取到 ${sheetDataValues.length} 行資料`);
 
             } catch (googleSheetError) {
-                console.error("從 Google Sheet 讀取資料失敗:", googleSheetError);
+                console.error(`[SYNC] 從 Google Sheet 讀取資料失敗 (Sheet ID: ${sheetId}, Range: ${range}):`, googleSheetError.message);
                 // 更詳細的錯誤訊息，幫助前端理解問題
                 return res.status(500).json({ message: `從 Google Sheet 讀取資料失敗: ${googleSheetError.message}` });
             }
@@ -293,68 +302,69 @@ app.post("/sync-sheet-data/:id", async (req, res) => {
 
             if (sheetDataValues.length > 0) {
                 const inserted = [];
-                const updated = [];
+                const updatedAttempts = []; // 儲存每次成功的更新嘗試 (包括重複 ID 觸發的，但這裡會檢查是否有實際資料變更)
+                const updatedUniqueIds = new Set(); // 新增 Set 來追蹤唯一的資料庫 ID
                 const failedOperations = [];
-                const customerId = parseInt(id);
+                // const customerId = parseInt(id); // 已在上面解析
 
-                for (const row of sheetDataValues) {
+
+                for (let i = 0; i < sheetDataValues.length; i++) {
+                    const row = sheetDataValues[i];
+                    console.log(`[SYNC] 處理 Google Sheet 第 ${i + 2} 行:`, row); // 記錄正在處理的行號 (從 2 開始)
+
                     // 確保每一行都有足夠的欄位
                     // 根據您提供的格式，從賓客編號到電子郵件地址共有 9 列 (A 到 I)
                     if (row.length < 9) {
-                        console.warn("跳過無效的賓客資料行 (欄位不足):", row);
-                        failedOperations.push({ rowData: row, reason: "欄位不足" });
+                        console.warn(`[SYNC] 跳過 Google Sheet 第 ${i + 2} 行：欄位不足 (${row.length} < 9)`, row);
+                        failedOperations.push({ rowIndex: i + 2, rowData: row, reason: "欄位不足" });
                         continue;
                     }
 
-                    // Google Sheet 欄位順序 (索引從 0 開始):
-                    // A: 賓客編號 (0)
-                    // B: 賓客姓名 (1)
-                    // C: 與新郎的關係 (2)
-                    // D: 與新娘的關係 (3)
-                    // E: 與新郎新娘關係 (4)
-                    // F: 賓客簡短描述 (5)
-                    // G: 共同回憶簡述 (6)
-                    // H: 想說的話 (7)
-                    // I: 電子郵件地址 (8)
-
-                    const googleSheetGuestId = row[0] ? String(row[0]) : ""; // A 列 - 唯一的賓客 ID，確保是字串
-                    const guestName = row[1] || ""; // B 列
-                    const relationshipWithGroom = row[2] || ""; // C 列
-                    const relationshipWithBride = row[3] || ""; // D 列
-                    const relationshipWithCouple = row[4] || ""; // E 列
-                    const guestDescription = row[5] || ""; // F 列
-                    const sharedMemories = row[6] || ""; // G 列
-                    const message = row[7] || ""; // H 列
-                    const email = row[8] || ""; // I 列
-
+                    const googleSheetGuestId = row[0] ? String(row[0]).trim() : "";
+                    const guestName = row[1] ? String(row[1]).trim() : "";
+                    const relationshipWithGroom = row[2] ? String(row[2]).trim() : "";
+                    const relationshipWithBride = row[3] ? String(row[3]).trim() : "";
+                    const relationshipWithCouple = row[4] ? String(row[4]).trim() : "";
+                    const guestDescription = row[5] ? String(row[5]).trim() : "";
+                    const sharedMemories = row[6] ? String(row[6]).trim() : "";
+                    const message = row[7] ? String(row[7]).trim() : "";
+                    const email = row[8] ? String(row[8]).trim() : "";
 
                     // 如果賓客 ID 或 Email 為空，則跳過此行 (ID 是唯一的識別鍵，Email 是必要欄位)
                     if (!googleSheetGuestId) {
-                        console.warn("跳過無效的賓客資料行 (賓客 ID 為空):", row);
-                        failedOperations.push({ rowData: row, reason: "賓客 ID 為空" });
+                        console.warn(`[SYNC] 跳過 Google Sheet 第 ${i + 2} 行：賓客 ID 為空`, row);
+                        failedOperations.push({ rowIndex: i + 2, rowData: row, reason: "賓客 ID 為空" });
                         continue;
                     }
                     if (!email) {
-                        console.warn(`跳過賓客資料行 (賓客 ID: ${googleSheetGuestId}, Email 為空):`, row);
-                        failedOperations.push({ googleSheetGuestId, guestName, operation: 'process', reason: "Email 為空，無法處理" });
+                        console.warn(`[SYNC] 跳過 Google Sheet 第 ${i + 2} 行 (賓客 ID: ${googleSheetGuestId})：Email 為空`, row);
+                        failedOperations.push({ rowIndex: i + 2, googleSheetGuestId, guestName, operation: 'process', reason: "Email 為空，無法處理" });
                         continue;
                     }
 
+                    console.log(`[SYNC] 處理賓客 ID: ${googleSheetGuestId}, 姓名: ${guestName}, Email: ${email}`);
 
                     await new Promise((resolve) => {
+                        // **查詢資料庫獲取現有記錄的所有相關欄位**
+                        const selectQuery = `SELECT id, guest_name, email, relationshipWithGroom, relationshipWithBride, relationshipWithCouple, guestDescription, sharedMemories, message
+                                             FROM guests
+                                             WHERE google_sheet_guest_id = ? AND customer_id = ?`;
+
                         pool.query(
-                            // **使用 google_sheet_guest_id 和 customer_id 來判斷是否存在**
-                            "SELECT id FROM guests WHERE google_sheet_guest_id = ? AND customer_id = ?",
+                            selectQuery,
                             [googleSheetGuestId, customerId],
                             (err, existingResults) => {
+                                console.log(`[SYNC] 查詢資料庫 (ID: ${googleSheetGuestId}, Customer ID: ${customerId}) 結果:`, existingResults);
+
                                 if (err) {
-                                    console.error("查詢現有賓客失敗:", err);
-                                    failedOperations.push({ googleSheetGuestId, guestName, operation: 'query_existing', reason: `查詢資料庫失敗: ${err.message}` });
+                                    console.error(`[SYNC] 查詢現有賓客失敗 (ID: ${googleSheetGuestId}, Customer ID: ${customerId}):`, err);
+                                    failedOperations.push({ rowIndex: i + 2, googleSheetGuestId, guestName, operation: 'query_existing', reason: `查詢資料庫失敗: ${err.message}` });
                                     return resolve(); // 繼續處理下一筆資料
                                 }
 
                                 if (existingResults.length === 0) {
                                     // 資料不存在 (根據 google_sheet_guest_id 和 customer_id 判斷)，執行 INSERT
+                                    console.log(`[SYNC] 賓客 (ID: ${googleSheetGuestId}) 不存在，執行插入`);
                                     pool.query(
                                         "INSERT INTO guests (google_sheet_guest_id, guest_name, email, relationshipWithGroom, relationshipWithBride, relationshipWithCouple, guestDescription, sharedMemories, message, is_sent, customer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                         [
@@ -372,15 +382,16 @@ app.post("/sync-sheet-data/:id", async (req, res) => {
                                         ],
                                         (err, insertResults) => {
                                             if (err) {
-                                                console.error("插入賓客資料失敗:", err);
+                                                console.error(`[SYNC] 插入賓客資料失敗 (ID: ${googleSheetGuestId}):`, err);
                                                 // 檢查是否是唯一約束錯誤 (理論上不應該發生如果資料庫結構修改正確)
                                                 if (err.code === 'ER_DUP_ENTRY') {
-                                                    failedOperations.push({ googleSheetGuestId, guestName, operation: 'insert', reason: "資料已存在 (重複)" });
+                                                    failedOperations.push({ rowIndex: i + 2, googleSheetGuestId, guestName, operation: 'insert', reason: "資料已存在 (重複)" });
                                                 } else {
-                                                    failedOperations.push({ googleSheetGuestId, guestName, operation: 'insert', reason: `插入資料庫失敗: ${err.message}` });
+                                                    failedOperations.push({ rowIndex: i + 2, googleSheetGuestId, guestName, operation: 'insert', reason: `插入資料庫失敗: ${err.message}` });
                                                 }
                                             } else {
                                                 // 成功插入
+                                                console.log(`[SYNC] 成功插入賓客 (ID: ${googleSheetGuestId}, DB ID: ${insertResults.insertId})`);
                                                 inserted.push({
                                                     id: insertResults.insertId,
                                                     google_sheet_guest_id: googleSheetGuestId,
@@ -399,78 +410,114 @@ app.post("/sync-sheet-data/:id", async (req, res) => {
                                         }
                                     );
                                 } else if (existingResults.length === 1) {
-                                    // 資料已存在且只有一筆匹配 (根據 google_sheet_guest_id 和 customer_id 判斷)，執行 UPDATE
-                                    const existingGuestId = existingResults[0].id; // 獲取資料庫中該記錄的自增長 ID
-                                    pool.query(
-                                        `UPDATE guests SET
-                                        guest_name = ?, -- 姓名可能也會更新
-                                        email = ?, -- Email 可能會更新
-                                        relationshipWithGroom = ?,
-                                        relationshipWithBride = ?,
-                                        relationshipWithCouple = ?,
-                                        guestDescription = ?,
-                                        sharedMemories = ?,
-                                        message = ?
-                                        WHERE id = ?`, // 使用資料庫的自增長 ID 進行更新
-                                        [
-                                            guestName, // 使用 Google Sheet 中的新姓名
-                                            email, // 使用 Google Sheet 中的新 Email
-                                            relationshipWithGroom,
-                                            relationshipWithBride,
-                                            relationshipWithCouple,
-                                            guestDescription,
-                                            sharedMemories,
-                                            message,
-                                            existingGuestId
-                                        ],
-                                        (err, updateResults) => {
-                                            if (err) {
-                                                console.error(`更新賓客資料失敗 (ID: ${existingGuestId}, Google Sheet ID: ${googleSheetGuestId}):`, err);
-                                                failedOperations.push({ googleSheetGuestId, guestName, operation: 'update', reason: `更新資料庫失敗: ${err.message}` });
-                                            } else {
-                                                // 成功更新
-                                                updated.push({
-                                                    id: existingGuestId,
-                                                    google_sheet_guest_id: googleSheetGuestId,
-                                                    guest_name: guestName,
-                                                    email: email,
-                                                    // is_sent 狀態不應在這裡被 Google Sheet 的資料覆蓋
-                                                    relationshipWithGroom,
-                                                    relationshipWithBride,
-                                                    relationshipWithCouple,
-                                                    guestDescription,
-                                                    sharedMemories,
-                                                    message
-                                                });
-                                                console.log(`賓客資料已更新 (ID: ${existingGuestId}, Google Sheet ID: ${googleSheetGuestId}): ${guestName} (${email})`);
+                                    // 資料已存在且只有一筆匹配，獲取現有資料
+                                    const existingGuest = existingResults[0];
+                                    const existingGuestId = existingGuest.id;
+
+                                    console.log(`[SYNC] 賓客 (ID: ${googleSheetGuestId}, DB ID: ${existingGuestId}) 已存在，比較資料差異`);
+
+                                    // **比較 Google Sheet 資料與資料庫現有資料**
+                                    // 注意：這裡比較時要處理 null 和 undefined，並移除字串首尾空白
+                                    const isDataDifferent =
+                                        (guestName !== (existingGuest.guest_name || '').trim()) ||
+                                        (email !== (existingGuest.email || '').trim()) || // Email 也可能更新
+                                        (relationshipWithGroom !== (existingGuest.relationshipWithGroom || '').trim()) ||
+                                        (relationshipWithBride !== (existingGuest.relationshipWithBride || '').trim()) ||
+                                        (relationshipWithCouple !== (existingGuest.relationshipWithCouple || '').trim()) ||
+                                        (guestDescription !== (existingGuest.guestDescription || '').trim()) ||
+                                        (sharedMemories !== (existingGuest.sharedMemories || '').trim()) ||
+                                        (message !== (existingGuest.message || '').trim());
+                                    // is_sent 狀態通常不由 Google Sheet 控制，所以不包含在這裡比較
+
+                                    if (isDataDifferent) {
+                                        console.log(`[SYNC] 資料存在差異，執行更新 (DB ID: ${existingGuestId}, Google Sheet ID: ${googleSheetGuestId})`);
+                                        pool.query(
+                                            `UPDATE guests SET
+                                            guest_name = ?,
+                                            email = ?,
+                                            relationshipWithGroom = ?,
+                                            relationshipWithBride = ?,
+                                            relationshipWithCouple = ?,
+                                            guestDescription = ?,
+                                            sharedMemories = ?,
+                                            message = ?
+                                            WHERE id = ?`, // 使用資料庫的自增長 ID 進行更新
+                                            [
+                                                guestName, // 使用 Google Sheet 中的新姓名
+                                                email, // 使用 Google Sheet 中的新 Email
+                                                relationshipWithGroom,
+                                                relationshipWithBride,
+                                                relationshipWithCouple,
+                                                guestDescription,
+                                                sharedMemories,
+                                                message,
+                                                existingGuestId
+                                            ],
+                                            (err, updateResults) => {
+                                                if (err) {
+                                                    console.error(`[SYNC] 更新賓客資料失敗 (ID: ${existingGuestId}, Google Sheet ID: ${googleSheetGuestId}):`, err);
+                                                    failedOperations.push({ rowIndex: i + 2, googleSheetGuestId, guestName, operation: 'update', reason: `更新資料庫失敗: ${err.message}` });
+                                                } else {
+                                                    // 檢查是否有實際的行被影響 (affectedRows > 0 表示資料真的有變更)
+                                                    if (updateResults.affectedRows > 0) {
+                                                        console.log(`[SYNC] 成功更新賓客資料 (affectedRows: ${updateResults.affectedRows}) (DB ID: ${existingGuestId}, Google Sheet ID: ${googleSheetGuestId})`);
+                                                        // 將成功的更新嘗試記錄到 updatedAttempts 陣列
+                                                        updatedAttempts.push({
+                                                            id: existingGuestId, // 記錄資料庫 ID
+                                                            google_sheet_guest_id: googleSheetGuestId,
+                                                            guest_name: guestName,
+                                                            email: email,
+                                                            // is_sent 狀態不應在這裡被 Google Sheet 的資料覆蓋
+                                                            relationshipWithGroom,
+                                                            relationshipWithBride,
+                                                            relationshipWithCouple,
+                                                            guestDescription,
+                                                            sharedMemories,
+                                                            message
+                                                        });
+                                                        // 將資料庫 ID 加入 Set (確保唯一)
+                                                        updatedUniqueIds.add(existingGuestId);
+                                                        console.log(`[SYNC] 目前 unique updated 數量: ${updatedUniqueIds.size}`);
+                                                    } else {
+                                                        console.log(`[SYNC] 賓客資料與 Google Sheet 相同，跳過實際更新 (DB ID: ${existingGuestId}, Google Sheet ID: ${googleSheetGuestId})`);
+                                                    }
+                                                }
+                                                resolve(); // 繼續處理下一筆資料
                                             }
-                                            resolve(); // 繼續處理下一筆資料
-                                        }
-                                    );
+                                        );
+                                    } else {
+                                        console.log(`[SYNC] 賓客資料與 Google Sheet 相同，跳過更新 (DB ID: ${existingGuestId}, Google Sheet ID: ${googleSheetGuestId})`);
+                                        resolve(); // 資料相同，跳過更新
+                                    }
+
                                 } else {
                                     // 找到多筆匹配 (同一個客戶下，相同的 Google Sheet 賓客 ID 在資料庫中出現多次，這不應該發生如果唯一約束設定正確)
-                                    console.error(`錯誤：在客戶 ${customerId} 下，Google Sheet 賓客 ID '${googleSheetGuestId}' 在資料庫中出現多筆`, existingResults);
-                                    failedOperations.push({ googleSheetGuestId, guestName, operation: 'query_conflict', reason: `資料庫中存在多筆相同的 Google Sheet 賓客 ID` });
+                                    console.error(`[SYNC] 錯誤：在客戶 ${customerId} 下，Google Sheet 賓客 ID '${googleSheetGuestId}' 在資料庫中出現多筆`, existingResults);
+                                    failedOperations.push({ rowIndex: i + 2, googleSheetGuestId, guestName, operation: 'query_conflict', reason: `資料庫中存在多筆相同的 Google Sheet 賓客 ID` });
                                     resolve(); // 繼續處理下一筆資料
                                 }
                             }
                         );
                     });
                 }
-                // 回傳同步結果摘要
+                // 回傳同步結果摘要 - 使用 updatedUniqueIds.size 計算更新筆數
+                console.log(`[SYNC] 同步完成。插入 ${inserted.length} 筆，唯一更新 ${updatedUniqueIds.size} 筆，失敗 ${failedOperations.length} 筆`);
                 return res.status(200).json({
-                    message: `同步完成：插入 ${inserted.length} 筆，更新 ${updated.length} 筆，失敗 ${failedOperations.length} 筆`,
+                    message: `同步完成：插入 ${inserted.length} 筆，更新 ${updatedUniqueIds.size} 筆，失敗 ${failedOperations.length} 筆`,
                     insertedCount: inserted.length,
-                    updatedCount: updated.length,
-                    failedOperations: failedOperations.map(f => ({ ...f, rowData: undefined })) // 不回傳原始行資料
+                    updatedCount: updatedUniqueIds.size, // 使用 Set 的大小
+                    failedOperations: failedOperations.map(f => ({ ...f, rowData: undefined })), // 不回傳原始行資料
+                    // 可以選擇回傳 updatedAttempts 陣列，以顯示所有觸發更新的行
+                    // updatedAttempts: updatedAttempts.map(f => ({ ...f, rowData: undefined }))
                 });
 
             } else {
+                console.log(`[SYNC] Google Sheet 中沒有可同步的資料 (從 A2:I)`);
                 res.status(404).json({ message: "Google Sheet 中沒有可同步的資料 (從 A2:I)" });
             }
         });
     } catch (error) {
-        console.error("同步 Google Sheets 資料時發生未預期的錯誤:", error);
+        console.error("[SYNC] 同步 Google Sheets 資料時發生未預期的錯誤:", error);
         res.status(500).json({ message: "伺服器內部錯誤" });
     }
 });

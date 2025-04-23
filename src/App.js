@@ -5,7 +5,9 @@ import validator from 'validator'; // 引入 validator 函式庫
 function App() {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  // eslint-disable-next-line no-unused-vars
+  const [error, setError] = useState(null); // 忽略 ESLint 警告
+
 
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -20,6 +22,7 @@ function App() {
 
   const [formErrors, setFormErrors] = useState({}); // 使用物件來存儲多個欄位的錯誤
   const [isSubmitting, setIsSubmitting] = useState(false); // 新增狀態追蹤是否正在提交表單
+  const [isDeleting, setIsDeleting] = useState(false); // 新增狀態追蹤是否正在刪除
 
 
   useEffect(() => {
@@ -50,10 +53,13 @@ function App() {
       errors.email = "請輸入有效的電子郵件地址";
     }
     if (!formData.phone.trim()) errors.phone = "請填寫聯絡電話";
-    if (!formData.wedding_date) errors.wedding_date = "請選擇婚禮日期和時間"; // 更新錯誤訊息
+    // 婚禮日期非必填，但如果填了，格式要正確
+    if (formData.wedding_date && !validator.isISO8601(formData.wedding_date, { strict: true })) {
+      errors.wedding_date = "請選擇有效的婚禮日期和時間";
+    }
     if (!formData.form_link.trim()) {
       errors.form_link = "請填寫 Google 試算表連結";
-    } else if (!validator.isURL(formData.form_link, { require_protocol: true })) { // 簡單的 URL 格式驗證，要求包含協定
+    } else if (!validator.isURL(formData.form_link, { require_protocol: true })) {
       errors.form_link = "請輸入有效的連結 (包含 http:// 或 https://)";
     }
     // wedding_location 目前不設定為必填，如果需要請取消註解下面這行
@@ -83,6 +89,7 @@ function App() {
     }
 
     setIsSubmitting(true); // 開始提交，設置狀態為 true
+    setFormErrors({}); // 提交前清除錯誤
 
     try {
       const res = await fetch("http://localhost:5000/customers", {
@@ -97,6 +104,7 @@ function App() {
       if (!res.ok) {
         // 根據後端返回的錯誤訊息來顯示
         const errorMessage = data.message || "新增失敗，請稍後再試";
+        console.error("新增客戶 API 錯誤:", errorMessage);
         throw new Error(errorMessage);
       }
 
@@ -124,7 +132,7 @@ function App() {
         wedding_location: "", // 清空地點欄位
         form_link: "",
       });
-      setFormErrors({}); // 清空錯誤訊息
+      // setFormErrors({}); // 成功時清除錯誤訊息 (已在提交前和 Modal 關閉時清除)
       alert("客戶新增成功！"); // 顯示成功訊息
 
     } catch (err) {
@@ -135,6 +143,51 @@ function App() {
       setIsSubmitting(false); // 提交結束，設置狀態為 false
     }
   };
+
+
+  // ==== 刪除客戶函式 ====
+  const handleDeleteCustomer = async (customerId, customerName) => {
+    // 確認步驟：要求使用者輸入特定文字
+    const confirmationText = "確認刪除";
+    const userInput = window.prompt(`請輸入 "${confirmationText}" 以確認刪除客戶 ${customerName} (ID: ${customerId})：`);
+
+    // 檢查使用者輸入是否符合要求
+    if (userInput !== confirmationText) {
+      if (userInput !== null) { // 如果使用者按了取消，userInput 是 null
+        alert("輸入不符，已取消刪除。");
+      }
+      return; // 輸入不符或取消，則停止執行
+    }
+
+    setIsDeleting(true); // 開始刪除，設置狀態為 true
+
+    try {
+      const res = await fetch(`http://localhost:5000/customers/${customerId}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json(); // 嘗試解析 JSON
+
+      if (!res.ok) {
+        // 根據後端返回的錯誤訊息來顯示
+        const errorMessage = data.message || `刪除客戶 ${customerId} 失敗`;
+        console.error(`刪除客戶 API 錯誤 (ID: ${customerId}):`, errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      // 如果刪除成功，從前端列表中移除該客戶
+      setCustomers(customers.filter(customer => customer.id !== customerId));
+      alert(`客戶 ${customerName} (ID: ${customerId}) 刪除成功！`);
+
+
+    } catch (err) {
+      console.error("刪除客戶錯誤:", err);
+      alert("刪除客戶失敗：" + err.message);
+    } finally {
+      setIsDeleting(false); // 刪除結束，設置狀態為 false
+    }
+  };
+
 
   if (loading) {
     return (
@@ -156,7 +209,6 @@ function App() {
     // 外層容器使用更沉穩的背景色
     <div className="min-h-screen bg-slate-100 py-8 px-4">
       <div className="max-w-4xl mx-auto bg-white shadow-lg rounded-lg p-8">
-        {/* 新增 flex 容器來放置標題和按鈕 */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-semibold text-slate-700">
             小高婚慶後台管理系統
@@ -165,6 +217,7 @@ function App() {
             onClick={() => setShowForm(true)}
             // 調整按鈕顏色和樣式以符合沉穩風格
             className="bg-sky-700 text-white px-4 py-2 rounded-md shadow hover:bg-sky-800 transition-colors duration-200"
+            disabled={isSubmitting || isDeleting} // 在提交或刪除時禁用新增按鈕
           >
             新增客戶
           </button>
@@ -192,6 +245,7 @@ function App() {
               </div>
               <div className="grid grid-cols-1 gap-4">
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">新郎姓名</label>
                   <input
                     type="text"
                     name="groom_name"
@@ -205,6 +259,7 @@ function App() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">新娘姓名</label>
                   <input
                     type="text"
                     name="bride_name"
@@ -218,6 +273,7 @@ function App() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">聯絡信箱</label>
                   <input
                     type="email"
                     name="email"
@@ -231,6 +287,7 @@ function App() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">聯絡電話</label>
                   <input
                     type="tel"
                     name="phone"
@@ -244,6 +301,7 @@ function App() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">婚禮日期時間</label>
                   <input
                     type="datetime-local"
                     name="wedding_date"
@@ -255,7 +313,8 @@ function App() {
                   {formErrors.wedding_date && <p className="text-red-500 text-sm mt-1">{formErrors.wedding_date}</p>}
                 </div>
 
-                <div> {/* 新增地點輸入框 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">婚禮地點</label>
                   <input
                     type="text"
                     name="wedding_location"
@@ -265,11 +324,9 @@ function App() {
                     // 調整輸入框樣式
                     className={`border border-slate-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-sky-500 ${formErrors.wedding_location ? 'border-red-500' : ''}`}
                   />
-                  {formErrors.wedding_location && <p className="text-red-500 text-sm mt-1">{formErrors.wedding_location}</p>}
-                </div>
-
-
+                  {formErrors.wedding_location && <p className="text-red-500 text-sm mt-1">{formErrors.wedding_location}</p>}                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Google 試算表連結</label>
                   <input
                     type="text"
                     name="form_link"
@@ -283,7 +340,7 @@ function App() {
                 </div>
 
 
-                {formErrors.submit && <p className="text-red-600 text-sm mt-2 text-center">{formErrors.submit}</p>} {/* 顯示提交錯誤 */}
+                {formErrors.submit && <p className="text-red-600 text-sm mt-2 text-center">{formErrors.submit}</p>}
                 <div className="flex gap-4 mt-2 justify-end">
                   <button
                     onClick={handleSubmit}
@@ -318,9 +375,7 @@ function App() {
             </div>
           </div>
         )}
-
-
-        <table className="w-full text-center border-collapse table-auto"><thead className="bg-slate-300 text-slate-700"><tr><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新郎</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新娘</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">聯絡方式</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">操作</th></tr></thead><tbody>{customers.map((c) => (<tr key={c.id} className="hover:bg-slate-50"><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.groom_name}</td><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.bride_name}</td><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.email}</td><td className="py-3 px-4 border-b border-slate-200 text-lg"><Link to={`/customer/${c.id}`} className="inline-block bg-sky-600 text-white px-3 py-1 rounded hover:bg-sky-700 transition duration-300 ease-in-out">查看</Link></td></tr>))}</tbody></table>
+        <table className="w-full text-center border-collapse table-auto"><thead className="bg-slate-300 text-slate-700"><tr><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新郎</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">新娘</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">聯絡方式</th><th className="py-3 px-4 border-b border-slate-400 text-lg font-semibold">操作</th></tr></thead><tbody>{customers.map((c) => (<tr key={c.id} className="hover:bg-slate-50"><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.groom_name}</td><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.bride_name}</td><td className="py-3 px-4 border-b border-slate-200 text-lg">{c.email}</td><td className="py-3 px-4 border-b border-slate-200 text-lg flex justify-center space-x-2"><Link to={`/customer/${c.id}`} className="inline-block bg-sky-600 text-white px-3 py-1 rounded hover:bg-sky-700 transition duration-300 ease-in-out">查看</Link><button onClick={() => handleDeleteCustomer(c.id, `${c.groom_name} & ${c.bride_name}`)} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 transition duration-300 ease-in-out" disabled={isDeleting}>刪除</button></td></tr>))}</tbody></table>
 
         {customers.length === 0 && !loading && (
           <p className="text-center text-slate-500 mt-8 text-lg">目前沒有客戶資料。</p>

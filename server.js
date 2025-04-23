@@ -4,6 +4,7 @@ const cors = require("cors");
 const mysql = require("mysql2");
 const { google } = require("googleapis");
 const validator = require("validator"); // 引入 validator 函式庫用於驗證
+const moment = require('moment'); // 引入 moment.js 處理日期時間格式
 
 app.use(cors());
 app.use(express.json());
@@ -112,7 +113,7 @@ app.post("/customers", (req, res) => {
                 const year = dateObj.getFullYear();
                 const month = ('0' + (dateObj.getMonth() + 1)).slice(-2); // Months are 0-indexed
                 const day = ('0' + dateObj.getDate()).slice(-2);
-                wedding_date = `${year}-${month}-${day}`; // YYYY-MM-DD 格式
+                wedding_date = `${year}-${month}-${day}`; //--MM-DD 格式
 
                 const hours = ('0' + dateObj.getHours()).slice(-2);
                 const minutes = ('0' + dateObj.getMinutes()).slice(-2);
@@ -184,6 +185,167 @@ app.post("/customers", (req, res) => {
             google_sheet_link: form_link
         };
         res.status(201).json({ message: "新增成功", customer: newCustomer });
+    });
+});
+
+// ==== PUT /customers/:id 端點 (更新客戶資料) - 修正 ERR_HTTP_HEADERS_SENT ====
+app.put("/customers/:id", (req, res) => {
+    const customerId = req.params.id;
+    const {
+        groom_name,
+        bride_name,
+        email,
+        phone,
+        wedding_date: weddingDatetimeLocalString, // 接收 datetime-local 字串
+        wedding_location,
+        form_link
+    } = req.body;
+
+    // 後端基本輸入驗證 (地點可選填，所以不列入必填檢查)
+    if (!groom_name || !bride_name || !email || !phone || !weddingDatetimeLocalString || !form_link) {
+        return res.status(400).json({ message: "新郎姓名、新娘姓名、電子郵件、聯絡電話、婚禮日期和 Google Sheet 連結是必填項" });
+    }
+
+    if (!validator.isEmail(email)) {
+        return res.status(400).json({ message: "請輸入有效的電子郵件地址" });
+    }
+
+    if (!validator.isURL(form_link, { require_protocol: true })) {
+        return res.status(400).json({ message: "請輸入有效的 Google 試算表連結 (包含 http:// 或 https://)" });
+    }
+
+    // 您可以針對 phone 和 wedding_location 加入更多驗證
+
+
+    let wedding_date = null;
+    let wedding_time = null;
+
+    // 使用 Date 物件更穩健地解析 datetime-local 字串
+    if (weddingDatetimeLocalString) {
+        try {
+            const dateObj = new Date(weddingDatetimeLocalString);
+            if (!isNaN(dateObj.getTime())) {
+                const year = dateObj.getFullYear();
+                const month = ('0' + (dateObj.getMonth() + 1)).slice(-2); // Months are 0-indexed
+                const day = ('0' + dateObj.getDate()).slice(-2);
+                wedding_date = `${year}-${month}-${day}`; //--MM-DD 格式
+
+                const hours = ('0' + dateObj.getHours()).slice(-2);
+                const minutes = ('0' + dateObj.getMinutes()).slice(-2);
+                const seconds = ('0' + dateObj.getSeconds()).slice(-2);
+                wedding_time = `${hours}:${minutes}:${seconds}`; // HH:MM:SS 格式 (MySQL TIME)
+
+            } else {
+                console.warn(`PUT /customers/${customerId}: 無法解析婚禮日期時間字串為有效日期:`, weddingDatetimeLocalString);
+                wedding_date = null;
+                wedding_time = null;
+            }
+        } catch (parseError) {
+            console.error(`PUT /customers/${customerId}: 解析婚禮日期時間時發生錯誤:`, parseError);
+            wedding_date = null;
+            wedding_time = null;
+        }
+    }
+
+
+    const query = `
+        UPDATE customers
+        SET groom_name = ?, bride_name = ?, email = ?, phone = ?, wedding_date = ?, wedding_time = ?, wedding_location = ?, google_sheet_link = ?
+        WHERE id = ?
+    `;
+
+    pool.query(
+        query,
+        [groom_name, bride_name, email, phone, wedding_date, wedding_time, wedding_location, form_link, customerId],
+        (err, results) => {
+            if (err) {
+                console.error(`更新客戶 ${customerId} 資料到資料庫錯誤：`, err);
+                // 檢查是否是重複的電子郵件或連結等唯一約束錯誤
+                if (err.code === 'ER_DUP_ENTRY') {
+                    if (err.sqlMessage.includes('email')) {
+                        return res.status(409).json({ message: "此電子郵件已被使用" });
+                    }
+                    if (err.sqlMessage.includes('google_sheet_link')) {
+                        return res.status(409).json({ message: "此 Google Sheet 連結已被使用" });
+                    }
+                    return res.status(409).json({ message: "客戶資料已存在 (重複的電子郵件或 Google Sheet 連結)" });
+                }
+                // 檢查是否是日期、時間或地點格式錯誤
+                if (err.code && err.code.startsWith('ER_')) {
+                    console.error(`PUT /customers/${customerId} SQL 錯誤詳情:`, {
+                        code: err.code,
+                        sqlMessage: err.sqlMessage,
+                        sql: err.sql,
+                        values: [groom_name, bride_name, email, phone, wedding_date, wedding_time, wedding_location, form_link, customerId]
+                    });
+                    return res.status(400).json({ message: `資料格式錯誤：請檢查日期、時間或地點格式是否正確 (${err.sqlMessage})` });
+                }
+
+                return res.status(500).json({ message: "更新失敗，請稍後再試" });
+            }
+
+            if (results.affectedRows === 0) {
+                // 如果 affectedRows 是 0，表示找不到該 ID 的客戶
+                return res.status(404).json({ message: `找不到 ID 為 ${customerId} 的客戶資料` });
+            }
+
+            // 返回成功訊息或更新後的客戶資料 (可選)
+            return res.status(200).json({ message: "更新成功" });
+            // 或者可以返回更新後的客戶資料供前端更新 state
+            /*
+            const updatedCustomer = {
+                 id: parseInt(customerId),
+                 groom_name,
+                 bride_name,
+                 email,
+                 phone,
+                 wedding_date, // 後端返回的日期
+                 wedding_time, // 後端返回的時間
+                 wedding_location,
+                 google_sheet_link: form_link
+            };
+            return res.status(200).json({ message: "更新成功", customer: updatedCustomer });
+            */
+        }
+    );
+});
+
+// ==== 新增 DELETE /customers/:id 端點 (刪除客戶資料) ====
+app.delete("/customers/:id", (req, res) => {
+    const customerId = req.params.id;
+
+    // 簡單驗證 id 是否為數字
+    if (!validator.isInt(customerId)) {
+        console.warn(`DELETE /customers/${customerId}: 無效的客戶 ID`);
+        return res.status(400).json({ message: "無效的客戶 ID" });
+    }
+
+    // 注意：這裡只刪除 customers 表格中的記錄。
+    // 如果 guests 表格中有外鍵約束並設置 ON DELETE CASCADE，則相關的賓客記錄會自動刪除。
+    // 否則，您需要在刪除客戶之前手動刪除該客戶下的所有賓客記錄，以避免孤立數據。
+    // 例如： pool.query("DELETE FROM guests WHERE customer_id = ?", [customerId], (err, results) => { ... });
+    // 為了簡單起見，這裡只實現刪除 customers 表格的記錄，請根據您的資料庫設計調整。
+
+    const query = "DELETE FROM customers WHERE id = ?";
+
+    pool.query(query, [customerId], (err, results) => {
+        if (err) {
+            console.error(`刪除客戶 ${customerId} 資料庫錯誤：`, err);
+            // 檢查是否是因為外鍵約束導致無法刪除 (如果沒有設置 ON DELETE CASCADE)
+            if (err.code === 'ER_ROW_IS_REFERENCED_2') {
+                return res.status(409).json({ message: "無法刪除客戶，因為該客戶下仍有賓客資料。請先刪除所有相關賓客資料。" });
+            }
+            return res.status(500).json({ message: "刪除失敗，請稍後再試" });
+        }
+
+        if (results.affectedRows === 0) {
+            // 如果 affectedRows 是 0，表示找不到該 ID 的客戶
+            return res.status(404).json({ message: `找不到 ID 為 ${customerId} 的客戶資料` });
+        }
+
+        // 返回成功訊息
+        console.log(`成功刪除客戶 ID: ${customerId}`);
+        return res.status(200).json({ message: "刪除成功" });
     });
 });
 
@@ -507,8 +669,6 @@ app.post("/sync-sheet-data/:id", async (req, res) => {
                     insertedCount: inserted.length,
                     updatedCount: updatedUniqueIds.size, // 使用 Set 的大小
                     failedOperations: failedOperations.map(f => ({ ...f, rowData: undefined })), // 不回傳原始行資料
-                    // 可以選擇回傳 updatedAttempts 陣列，以顯示所有觸發更新的行
-                    // updatedAttempts: updatedAttempts.map(f => ({ ...f, rowData: undefined }))
                 });
 
             } else {
@@ -539,7 +699,7 @@ app.post('/update-status', (req, res) => {
     // 更新資料庫中的資料
     const query = 'UPDATE guests SET is_sent = ? WHERE id = ?';
 
-    pool.query(query, [status, guest_id], (err, results) => { // 修正 db.query 為 pool.query
+    pool.query(query, [status, guest_id], (err, results) => {
         if (err) {
             console.error('更新資料庫狀態錯誤:', err);
             return res.status(500).json({ message: '更新資料庫狀態失敗' });
@@ -548,7 +708,7 @@ app.post('/update-status', (req, res) => {
         if (results.affectedRows === 0) {
             return res.status(404).json({ message: `找不到 ID 為 ${guest_id} 的賓客資料` });
         }
-        res.status(200).json({ message: '資料庫狀態更新成功' });
+        return res.status(200).json({ message: '資料庫狀態更新成功' });
     });
 });
 

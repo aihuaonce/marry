@@ -35,6 +35,11 @@ function CustomerDetails() {
     // *** 新增狀態來管理提示訊息 { message: '...', type: 'success' | 'error' | null } ***
     const [notification, setNotification] = useState(null);
 
+    // *** 新增狀態來管理寄送請帖確認框 (移除輸入文字相關的狀態) ***
+    const [showSendEmailConfirm, setShowSendEmailConfirm] = useState(false);
+    // const [sendEmailConfirmationInput, setSendEmailConfirmationInput] = useState(''); // 移除此行
+    // const sendEmailConfirmationText = "確認寄送"; // 移除此行
+
 
     // 獨立函式用於抓取賓客資料，使用 useCallback進行 memoize
     const fetchSheetData = useCallback(async () => {
@@ -43,7 +48,6 @@ function CustomerDetails() {
             if (!sheetDataRes.ok) {
                 setSheetData([]);
                 console.warn("抓取賓客資料 API 返回非 OK 狀態:", sheetDataRes.status);
-                // 可以考慮在這裡設定一個錯誤通知，但由於是背景抓取，可能不需要打擾使用者
                 return;
             }
             const sheetData = await sheetDataRes.json();
@@ -52,13 +56,11 @@ function CustomerDetails() {
             } else {
                 setSheetData([]);
                 console.warn("抓取賓客資料 API 返回的格式非陣列:", sheetData);
-                // 可以考慮在這裡設定一個錯誤通知
             }
 
         } catch (err) {
             console.error("抓取賓客資料錯誤:", err);
             setSheetData([]);
-            // 可以考慮在這裡設定一個錯誤通知
         }
     }, [id]);
 
@@ -139,7 +141,6 @@ function CustomerDetails() {
             if (!res.ok) {
                 const errorText = await res.text();
                 console.error(`更新賓客 ${guestId} 狀態失敗: ${res.status} ${res.statusText} - ${errorText}`);
-                // *** 不在這裡設定通知，統一在 handleSendEmail 中處理狀態更新的結果 ***
                 return false;
             } else {
                 console.log(`賓客 ${guestId} 狀態更新成功`);
@@ -147,29 +148,19 @@ function CustomerDetails() {
             }
         } catch (err) {
             console.error(`呼叫更新狀態 API 錯誤 (賓客 ${guestId}):`, err);
-            // *** 不在這裡設定通知，統一在 handleSendEmail 中處理狀態更新的結果 ***
             return false;
         }
     };
 
 
-    // ==== 寄送請帖函式，加入確認步驟 ====
-    const handleSendEmail = async () => {
-        // 保留 window.confirm 因為這是需要使用者明確選擇的動作
-        const isConfirmed = window.confirm("確定要向所有未寄送且有有效電子郵件地址的賓客寄送請帖嗎？");
-        if (!isConfirmed) {
-            return; // 如果使用者取消，則停止執行
-        }
-
-
+    // ==== 處理點擊寄送請帖按鈕 (開啟確認框) ====
+    const handleSendEmailButtonClick = () => {
         if (!sheetData || sheetData.length === 0) {
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "沒有賓客資料，無法寄送邀請函。", type: "error" });
             return;
         }
 
         if (!customer) {
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "客戶資料尚未載入，無法寄送。", type: "error" });
             return;
         }
@@ -177,12 +168,22 @@ function CustomerDetails() {
         const guestsToSend = sheetData.filter(guest => !guest.is_sent && guest.email); // 只寄送未寄送且有 Email 的賓客
 
         if (guestsToSend.length === 0) {
-            // *** 替換 alert 為 setNotification ***
-            setNotification({ message: "所有賓客都已寄送過請帖，或沒有有效的電子郵件地址。", type: "info" }); // 可以用 info 或 success
+            setNotification({ message: "所有賓客都已寄送過請帖，或沒有有效的電子郵件地址。", type: "info" });
             return;
         }
 
-        setIsSendingEmail(true);
+
+        setShowSendEmailConfirm(true); // 顯示寄送確認 Modal
+    };
+
+    // ==== 處理寄送確認並執行寄信 API (移除輸入文字檢查) ====
+    const confirmSendEmail = async () => {
+        // 移除檢查使用者輸入文字的邏輯
+
+        setIsSendingEmail(true); // 開始寄送，設置狀態為 true
+        closeSendEmailConfirmModal(); // 關閉確認框
+
+        const guestsToSend = sheetData.filter(guest => !guest.is_sent && guest.email); // 再次過濾確保發送正確的賓客
 
         const payload = {
             customerId: id,
@@ -218,7 +219,6 @@ function CustomerDetails() {
                 throw new Error(`寄信 API 請求失敗：${res.status} ${res.statusText} - ${errorText}`);
             }
 
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "請帖寄送請求已發送！正在嘗試更新賓客狀態。", type: "success" });
 
             const updatePromises = guestsToSend.map(guest => updateGuestStatus(guest.id, 1));
@@ -227,30 +227,31 @@ function CustomerDetails() {
             const failedUpdates = guestsToSend.filter((_, index) => !updateResults[index]);
             if (failedUpdates.length > 0) {
                 console.error("以下賓客狀態更新失敗:", failedUpdates);
-                // *** 替換 alert 為 setNotification ***
-                setNotification({ message: `請帖寄送請求已發送，但有 ${failedUpdates.length} 位賓客狀態更新失敗。`, type: "warning" }); // 使用 warning 類型
+                setNotification({ message: `請帖寄送請求已發送，但有 ${failedUpdates.length} 位賓客狀態更新失敗。`, type: "warning" });
             } else {
-                // *** 替換 alert 為 setNotification ***
                 setNotification({ message: "請帖寄送成功且賓客狀態已更新！", type: "success" });
             }
 
-
-            await fetchSheetData();
+            await fetchSheetData(); // 重新抓取資料以更新 UI 上的寄送狀態
 
 
         } catch (err) {
             console.error("寄信錯誤:", err);
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "寄信失敗：" + err.message, type: "error" });
         } finally {
-            setIsSendingEmail(false);
+            setIsSendingEmail(false); // 寄送結束，設置狀態為 false
         }
+    };
+
+    // 關閉寄送確認框並清除狀態 (移除清除輸入框狀態)
+    const closeSendEmailConfirmModal = () => {
+        setShowSendEmailConfirm(false);
+        // setSendEmailConfirmationInput(''); // 移除此行
     };
 
 
     const handleSyncData = async () => {
         if (!customer) {
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "客戶資料尚未載入，無法同步。", type: "error" });
             return;
         }
@@ -269,7 +270,6 @@ function CustomerDetails() {
                 throw new Error(errorMessage);
             }
 
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: data.message, type: "success" });
 
 
@@ -277,7 +277,6 @@ function CustomerDetails() {
 
         } catch (err) {
             console.error("同步資料錯誤:", err);
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "同步資料失敗：" + err.message, type: "error" });
         } finally {
             setIsSyncing(false);
@@ -319,6 +318,7 @@ function CustomerDetails() {
 
 
     // ==== 編輯表單相關函式 ====
+    // *** 此函式用於處理編輯表單的輸入變化 ***
     const handleEditFormChange = (e) => {
         setEditFormData({ ...editFormData, [e.target.name]: e.target.value });
         // 當使用者修改欄位時，清除該欄位的錯誤訊息
@@ -360,6 +360,7 @@ function CustomerDetails() {
     };
 
 
+    // *** 此函式用於儲存編輯後的客戶資訊 ***
     const handleSaveEdit = async () => {
         if (!validateEditForm()) {
             return; // 驗證失敗，停止儲存
@@ -383,7 +384,6 @@ function CustomerDetails() {
                 throw new Error(errorMessage);
             }
 
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "客戶資料更新成功！", type: "success" });
 
             setShowEditForm(false); // 關閉 Modal
@@ -423,7 +423,6 @@ function CustomerDetails() {
         } catch (err) {
             console.error("更新客戶資料錯誤：", err);
             setEditFormErrors({ ...editFormErrors, submit: err.message || "更新失敗，請稍後再試" });
-            // *** 替換 alert 為 setNotification ***
             setNotification({ message: "更新客戶資料失敗：" + err.message, type: "error" });
         } finally {
             setIsSaving(false); // 儲存結束，設置狀態為 false
@@ -440,6 +439,32 @@ function CustomerDetails() {
                     {notification.message}
                 </div>
             )}
+
+            {showSendEmailConfirm && (
+                <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm transform transition-all duration-300 scale-100">
+                        <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200">
+                            <h2 className="text-xl font-bold text-gray-700">確認寄送請帖</h2>
+                            <button onClick={closeSendEmailConfirmModal} className="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                        </div>
+                        <p className="mb-4 text-gray-700">您確定要向所有未寄送且有有效電子郵件地址的賓客寄送請帖嗎？</p>
+
+                        <div className="flex gap-4 mt-4 justify-end">
+                            <button
+                                onClick={confirmSendEmail} // 點擊確認時呼叫 confirmSendEmail
+                                className="bg-green-600 text-white px-4 py-2 rounded-md shadow hover:bg-green-700 disabled:opacity-50"
+                                disabled={isSendingEmail} // 只根據是否正在寄送來禁用按鈕
+                            >
+                                {isSendingEmail ? '寄送中...' : '確認寄送'}
+                            </button>
+                            <button onClick={closeSendEmailConfirmModal} className="bg-gray-500 text-white px-4 py-2 rounded-md shadow hover:bg-gray-600" disabled={isSendingEmail}>
+                                取消
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
 
             <div className="max-w-4xl mx-auto bg-white shadow-lg rounded-lg p-8 relative">
 
@@ -461,7 +486,7 @@ function CustomerDetails() {
                     </button>
 
                     {!isCustomerInfoCollapsed && customer && (
-                        <div div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-lg text-gray-700">
+                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-lg text-gray-700">
                             <div className="md:col-span-2 flex flex-wrap gap-x-8">
                                 <p>
                                     <span className="font-semibold">新郎:</span> {customer.groom_name}
@@ -512,7 +537,7 @@ function CustomerDetails() {
                         <button
                             onClick={handleSyncData}
                             className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition duration-300 ease-in-out disabled:opacity-50"
-                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在打開編輯表單或儲存時也禁用其他按鈕
+                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm} // 在確認寄送 Modal 打開時也禁用其他按鈕
                         >
                             {isSyncing ? '同步中...' : '同步資料庫'}
                         </button>
@@ -540,15 +565,15 @@ function CustomerDetails() {
                                 }
                             }}
                             className="bg-yellow-600 text-white px-6 py-2 rounded hover:bg-yellow-700 transition duration-300 ease-in-out disabled:opacity-50"
-                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在載入、寄信、同步或已打開編輯表單或儲存時禁用
+                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm} // 在確認寄送 Modal 打開時也禁用
                         >
                             編輯客戶資訊
                         </button>
 
                         <button
-                            onClick={handleSendEmail} // 此函式內部已加入確認步驟 (window.confirm)
+                            onClick={handleSendEmailButtonClick} // 呼叫開啟 Modal 的函式
                             className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition duration-300 ease-in-out disabled:opacity-50"
-                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在打開編輯表單或儲存時也禁用
+                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm} // 在確認寄送 Modal 打開時也禁用
                         >
                             {isSendingEmail ? '寄送中...' : '寄送請帖'}
                         </button>
@@ -574,7 +599,7 @@ function CustomerDetails() {
                                         type="text"
                                         name="groom_name"
                                         value={editFormData.groom_name}
-                                        onChange={handleEditFormChange}
+                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
                                         placeholder="新郎姓名"
                                         className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.groom_name ? 'border-red-500' : ''}`}
                                     />
@@ -587,7 +612,7 @@ function CustomerDetails() {
                                         type="text"
                                         name="bride_name"
                                         value={editFormData.bride_name}
-                                        onChange={handleEditFormChange}
+                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
                                         placeholder="新娘姓名"
                                         className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.bride_name ? 'border-red-500' : ''}`}
                                     />
@@ -600,7 +625,7 @@ function CustomerDetails() {
                                         type="email"
                                         name="email"
                                         value={editFormData.email}
-                                        onChange={handleEditFormChange}
+                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
                                         placeholder="聯絡信箱"
                                         className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.email ? 'border-red-500' : ''}`}
                                     />
@@ -613,7 +638,7 @@ function CustomerDetails() {
                                         type="tel"
                                         name="phone"
                                         value={editFormData.phone}
-                                        onChange={handleEditFormChange}
+                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
                                         placeholder="聯絡電話"
                                         className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.phone ? 'border-red-500' : ''}`}
                                     />
@@ -626,7 +651,7 @@ function CustomerDetails() {
                                         type="datetime-local"
                                         name="wedding_date" // 注意：這裡的 name 依然用 wedding_date，但在 state 中會是 datetime-local 字串
                                         value={editFormData.wedding_date}
-                                        onChange={handleEditFormChange}
+                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
                                         className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.wedding_date ? 'border-red-500' : ''}`}
                                     />
                                     {editFormErrors.wedding_date && <p className="text-red-500 text-sm mt-1">{editFormErrors.wedding_date}</p>}
@@ -638,7 +663,7 @@ function CustomerDetails() {
                                         type="text"
                                         name="wedding_location"
                                         value={editFormData.wedding_location}
-                                        onChange={handleEditFormChange}
+                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
                                         placeholder="婚禮地點"
                                         className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.wedding_location ? 'border-red-500' : ''}`}
                                     />
@@ -652,7 +677,7 @@ function CustomerDetails() {
                                         type="text"
                                         name="form_link" // 注意：這裡的 name 依然用 form_link，但在 state 中會是 Google Sheet 連結
                                         value={editFormData.form_link}
-                                        onChange={handleEditFormChange}
+                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
                                         placeholder="google 試算表連結"
                                         className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.form_link ? 'border-red-500' : ''}`}
                                     />
@@ -663,7 +688,7 @@ function CustomerDetails() {
                                 {editFormErrors.submit && <p className="text-red-600 text-sm mt-2 text-center">{editFormErrors.submit}</p>}
                                 <div className="flex gap-4 mt-2 justify-end">
                                     <button
-                                        onClick={handleSaveEdit}
+                                        onClick={handleSaveEdit} // *** 這裡使用 handleSaveEdit ***
                                         className="bg-blue-600 text-white px-4 py-2 rounded-md shadow hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                         disabled={isSaving} // 儲存中時禁用按鈕
                                     >
@@ -694,7 +719,7 @@ function CustomerDetails() {
                                 <tr>
                                     <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客 ID</th>
                                     <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客姓名</th>
-                                    <th className="py-4 px-6 border-b border-gray-300 text-lg text-center">電子郵件地址</th>
+                                    <th className="py-4 px-6 border-b border-gray-300 text-lg">電子郵件地址</th>
                                     <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">是否寄送</th>
                                 </tr>
                             </thead>
@@ -716,7 +741,7 @@ function CustomerDetails() {
                     <p className="text-center text-gray-500 mt-4">目前沒有賓客資料。</p>
                 )}
             </div>
-        </div >
+        </div>
     );
 }
 

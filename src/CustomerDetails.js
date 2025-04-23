@@ -3,6 +3,17 @@ import { useParams, useNavigate } from "react-router-dom"; // 引入 useNavigate
 import moment from 'moment';
 import validator from 'validator'; // 引入 validator 函式庫用於驗證
 
+const templateOptions = [
+    { value: 'template1', label: '模板 1 (預設)', imageUrl: '/template_1.png' },
+    { value: 'template2', label: '模板 2 (我們結婚啦-紅)', imageUrl: '/template_2.png' },
+    { value: 'template3', label: '模板 3 (我們結婚啦-綠)', imageUrl: '/template_3.png' },
+    { value: 'template4', label: '模板 4 (婚禮邀請函-橘)', imageUrl: '/template_4.png' },
+    { value: 'template5', label: '模板 5 (囍結良緣)', imageUrl: '/template_5.png' },
+    { value: 'template6', label: '模板 6 (復古)', imageUrl: '/template_6.png' },
+    { value: 'template7', label: '模板 7 (粉粉的)', imageUrl: '/template_7.png' },
+];
+
+
 function CustomerDetails() {
     const { id } = useParams();
     const navigate = useNavigate(); // 獲取 navigate 函式
@@ -35,10 +46,13 @@ function CustomerDetails() {
     // *** 新增狀態來管理提示訊息 { message: '...', type: 'success' | 'error' | null } ***
     const [notification, setNotification] = useState(null);
 
-    // *** 新增狀態來管理寄送請帖確認框 (移除輸入文字相關的狀態) ***
+    // *** 新增狀態來管理寄送請帖確認框和選擇的模板與預覽圖片 ***
     const [showSendEmailConfirm, setShowSendEmailConfirm] = useState(false);
-    // const [sendEmailConfirmationInput, setSendEmailConfirmationInput] = useState(''); // 移除此行
-    // const sendEmailConfirmationText = "確認寄送"; // 移除此行
+    const [selectedTemplate, setSelectedTemplate] = useState(templateOptions[0].value); // 預設選擇第一個模板
+    const [previewImageUrl, setPreviewImageUrl] = useState(templateOptions[0].imageUrl); // 儲存預覽圖片 URL
+
+    // *** 新增狀態來控制圖片預覽 Modal 的顯示與隱藏 ***
+    const [showImagePreviewModal, setShowImagePreviewModal] = useState(false);
 
 
     // 獨立函式用於抓取賓客資料，使用 useCallback進行 memoize
@@ -127,6 +141,18 @@ function CustomerDetails() {
     }, [notification]);
 
 
+    // *** 使用 useEffect 來更新預覽圖片 URL ***
+    useEffect(() => {
+        const selectedOption = templateOptions.find(option => option.value === selectedTemplate);
+        if (selectedOption) {
+            setPreviewImageUrl(selectedOption.imageUrl);
+        } else {
+            // 如果找不到對應的模板，可以設定一個預設圖片或清空
+            setPreviewImageUrl(''); // 或者一個錯誤圖片 URL
+        }
+    }, [selectedTemplate]); // 當 selectedTemplate 改變時觸發
+
+
     // 函式用於更新單個賓客的寄送狀態
     const updateGuestStatus = async (guestId, status) => {
         try {
@@ -172,6 +198,9 @@ function CustomerDetails() {
             return;
         }
 
+        // 在顯示確認 Modal 前，確保 selectedTemplate 和預覽圖片有預設值
+        setSelectedTemplate(templateOptions[0].value); // 預設選擇第一個模板
+        // previewImageUrl 會在 useEffect 中根據 selectedTemplate 自動更新
 
         setShowSendEmailConfirm(true); // 顯示寄送確認 Modal
     };
@@ -200,7 +229,8 @@ function CustomerDetails() {
                 guestDescription: guest.guestDescription,
                 sharedMemories: guest.sharedMemories,
                 message: guest.message
-            }))
+            })),
+            selectedTemplate: selectedTemplate, // *** 新增：包含選擇的模板資訊 ***
         };
 
         console.log("發送到 n8n 的 payload:", payload);
@@ -247,6 +277,14 @@ function CustomerDetails() {
     const closeSendEmailConfirmModal = () => {
         setShowSendEmailConfirm(false);
         // setSendEmailConfirmationInput(''); // 移除此行
+        // 您可以選擇在這裡重置選擇的模板為預設值：
+        // setSelectedTemplate(templateOptions[0].value);
+        // setPreviewImageUrl(templateOptions[0].imageUrl);
+    };
+
+    // *** 關閉圖片預覽 Modal 的函式 ***
+    const closeImagePreviewModal = () => {
+        setShowImagePreviewModal(false);
     };
 
 
@@ -442,12 +480,37 @@ function CustomerDetails() {
 
             {showSendEmailConfirm && (
                 <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50 p-4">
-                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm transform transition-all duration-300 scale-100">
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm md:max-w-md transform transition-all duration-300 scale-100">
                         <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200">
                             <h2 className="text-xl font-bold text-gray-700">確認寄送請帖</h2>
                             <button onClick={closeSendEmailConfirmModal} className="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
                         </div>
                         <p className="mb-4 text-gray-700">您確定要向所有未寄送且有有效電子郵件地址的賓客寄送請帖嗎？</p>
+
+                        <div className="mb-4 flex items-end gap-4">
+                            <div className="flex-grow">
+                                <label htmlFor="template-select" className="block text-sm font-medium text-gray-700 mb-1">選擇請帖模板:</label>
+                                <select
+                                    id="template-select"
+                                    value={selectedTemplate}
+                                    onChange={(e) => setSelectedTemplate(e.target.value)} // 更新 selectedTemplate 狀態
+                                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+                                >
+                                    {templateOptions.map(option => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <button
+                                onClick={() => setShowImagePreviewModal(true)} // 點擊時打開圖片預覽 Modal
+                                className="bg-blue-600 text-white px-4 py-2 rounded-md shadow hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50"
+                                disabled={!previewImageUrl} // 如果沒有預覽圖片 URL，則禁用按鈕
+                            >
+                                預覽模板
+                            </button>
+                        </div>
 
                         <div className="flex gap-4 mt-4 justify-end">
                             <button
@@ -464,6 +527,26 @@ function CustomerDetails() {
                     </div>
                 </div>
             )}
+
+            {showImagePreviewModal && previewImageUrl && (
+                <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl p-6 max-w-full max-h-full overflow-auto transform transition-all duration-300 scale-100 relative">
+                        <button
+                            onClick={closeImagePreviewModal}
+                            className="absolute top-2 right-2 bg-gray-300 text-gray-700 rounded-full p-1 text-lg hover:bg-gray-400 z-10" // 調整位置和樣式
+                            aria-label="Close preview"
+                        >
+                            &times;
+                        </button>
+                        <img
+                            src={previewImageUrl}
+                            alt="Template Preview"
+                            className="max-w-full h-auto mx-auto" // 確保圖片不超出 Modal 範圍
+                        />
+                    </div>
+                </div>
+            )
+            }
 
 
             <div className="max-w-4xl mx-auto bg-white shadow-lg rounded-lg p-8 relative">
@@ -532,216 +615,222 @@ function CustomerDetails() {
                     )}
                 </div>
 
-                {customer && (
-                    <div className="flex justify-center gap-4 mb-6 flex-wrap">
-                        <button
-                            onClick={handleSyncData}
-                            className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition duration-300 ease-in-out disabled:opacity-50"
-                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm} // 在確認寄送 Modal 打開時也禁用其他按鈕
-                        >
-                            {isSyncing ? '同步中...' : '同步資料庫'}
-                        </button>
+                {
+                    customer && (
+                        <div className="flex justify-center gap-4 mb-6 flex-wrap">
+                            <button
+                                onClick={handleSyncData}
+                                className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition duration-300 ease-in-out disabled:opacity-50"
+                                disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm || showImagePreviewModal} // 在確認寄送 Modal 或圖片預覽 Modal 打開時也禁用其他按鈕
+                            >
+                                {isSyncing ? '同步中...' : '同步資料庫'}
+                            </button>
 
-                        <button
-                            onClick={() => {
-                                // 打開編輯 Modal，並使用當前客戶資料初始化表單
-                                if (customer) {
-                                    const initialEditData = {
-                                        groom_name: customer.groom_name || "",
-                                        bride_name: customer.bride_name || "",
-                                        email: customer.email || "",
-                                        phone: customer.phone || "",
-                                        // 將日期和時間合併為YYYY-MM-DDTHH:mm 格式 (datetime-local 所需)
-                                        // 處理日期和時間可能為 null 的情況
-                                        wedding_date: (customer.wedding_date && customer.wedding_time)
-                                            ? `${moment(customer.wedding_date).format('YYYY-MM-DD')}T${customer.wedding_time.substring(0, 5)}` // 取 HH:mm 部分
-                                            : customer.wedding_date ? moment(customer.wedding_date).format('YYYY-MM-DD') : '', // 如果只有日期
-                                        wedding_location: customer.wedding_location || "",
-                                        form_link: customer.google_sheet_link || "", // 注意欄位名稱對應
-                                    };
-                                    setEditFormData(initialEditData);
-                                    setEditFormErrors({}); // 打開表單時清除錯誤
-                                    setShowEditForm(true);
-                                }
-                            }}
-                            className="bg-yellow-600 text-white px-6 py-2 rounded hover:bg-yellow-700 transition duration-300 ease-in-out disabled:opacity-50"
-                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm} // 在確認寄送 Modal 打開時也禁用
-                        >
-                            編輯客戶資訊
-                        </button>
+                            <button
+                                onClick={() => {
+                                    // 打開編輯 Modal，並使用當前客戶資料初始化表單
+                                    if (customer) {
+                                        const initialEditData = {
+                                            groom_name: customer.groom_name || "",
+                                            bride_name: customer.bride_name || "",
+                                            email: customer.email || "",
+                                            phone: customer.phone || "",
+                                            // 將日期和時間合併為YYYY-MM-DDTHH:mm 格式 (datetime-local 所需)
+                                            // 處理日期和時間可能為 null 的情況
+                                            wedding_date: (customer.wedding_date && customer.wedding_time)
+                                                ? `${moment(customer.wedding_date).format('YYYY-MM-DD')}T${customer.wedding_time.substring(0, 5)}` // 取 HH:mm 部分
+                                                : customer.wedding_date ? moment(customer.wedding_date).format('YYYY-MM-DD') : '', // 如果只有日期
+                                            wedding_location: customer.wedding_location || "",
+                                            form_link: customer.google_sheet_link || "",
+                                        };
+                                        setEditFormData(initialEditData);
+                                        setEditFormErrors({}); // 打開表單時清除錯誤
+                                        setShowEditForm(true);
+                                    }
+                                }}
+                                className="bg-yellow-600 text-white px-6 py-2 rounded hover:bg-yellow-700 transition duration-300 ease-in-out disabled:opacity-50"
+                                disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm || showImagePreviewModal} // 在確認寄送 Modal 或圖片預覽 Modal 打開時也禁用
+                            >
+                                編輯客戶資訊
+                            </button>
 
-                        <button
-                            onClick={handleSendEmailButtonClick} // 呼叫開啟 Modal 的函式
-                            className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition duration-300 ease-in-out disabled:opacity-50"
-                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm} // 在確認寄送 Modal 打開時也禁用
-                        >
-                            {isSendingEmail ? '寄送中...' : '寄送請帖'}
-                        </button>
-                    </div>
-                )}
+                            <button
+                                onClick={handleSendEmailButtonClick} // 呼叫開啟 Modal 的函式
+                                className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition duration-300 ease-in-out disabled:opacity-50"
+                                disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving || showSendEmailConfirm || showImagePreviewModal} // 在確認寄送 Modal 或圖片預覽 Modal 打開時也禁用
+                            >
+                                {isSendingEmail ? '寄送中...' : '寄送請帖'}
+                            </button>
+                        </div>
+                    )
+                }
 
 
-                {showEditForm && (
-                    <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-                        <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-100">
-                            <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200">
-                                <h2 className="text-xl font-bold text-gray-700">編輯客戶資訊</h2>
-                                <button onClick={() => {
-                                    setShowEditForm(false);
-                                    setEditFormErrors({}); // 關閉表單時清除錯誤訊息
-                                    // 可以選擇重置 editFormData 或保持原狀
-                                }} className="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-                            </div>
-                            <div className="grid grid-cols-1 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">新郎姓名</label>
-                                    <input
-                                        type="text"
-                                        name="groom_name"
-                                        value={editFormData.groom_name}
-                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
-                                        placeholder="新郎姓名"
-                                        className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.groom_name ? 'border-red-500' : ''}`}
-                                    />
-                                    {editFormErrors.groom_name && <p className="text-red-500 text-sm mt-1">{editFormErrors.groom_name}</p>}
+                {
+                    showEditForm && (
+                        <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
+                            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md transform transition-all duration-300 scale-100">
+                                <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200">
+                                    <h2 className="text-xl font-bold text-gray-700">編輯客戶資訊</h2>
+                                    <button onClick={() => {
+                                        setShowEditForm(false);
+                                        setEditFormErrors({}); // 關閉表單時清除錯誤訊息
+                                        // 可以選擇重置 editFormData 或保持原狀
+                                    }} className="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
                                 </div>
+                                <div className="grid grid-cols-1 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">新郎姓名</label>
+                                        <input
+                                            type="text"
+                                            name="groom_name"
+                                            value={editFormData.groom_name}
+                                            onChange={handleEditFormChange}
+                                            placeholder="新郎姓名"
+                                            className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.groom_name ? 'border-red-500' : ''}`}
+                                        />
+                                        {editFormErrors.groom_name && <p className="text-red-500 text-sm mt-1">{editFormErrors.groom_name}</p>}
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">新娘姓名</label>
-                                    <input
-                                        type="text"
-                                        name="bride_name"
-                                        value={editFormData.bride_name}
-                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
-                                        placeholder="新娘姓名"
-                                        className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.bride_name ? 'border-red-500' : ''}`}
-                                    />
-                                    {editFormErrors.bride_name && <p className="text-red-500 text-sm mt-1">{editFormErrors.bride_name}</p>}
-                                </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">新娘姓名</label>
+                                        <input
+                                            type="text"
+                                            name="bride_name"
+                                            value={editFormData.bride_name}
+                                            onChange={handleEditFormChange}
+                                            placeholder="新娘姓名"
+                                            className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.bride_name ? 'border-red-500' : ''}`}
+                                        />
+                                        {editFormErrors.bride_name && <p className="text-red-500 text-sm mt-1">{editFormErrors.bride_name}</p>}
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">聯絡信箱</label>
-                                    <input
-                                        type="email"
-                                        name="email"
-                                        value={editFormData.email}
-                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
-                                        placeholder="聯絡信箱"
-                                        className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.email ? 'border-red-500' : ''}`}
-                                    />
-                                    {editFormErrors.email && <p className="text-red-500 text-sm mt-1">{editFormErrors.email}</p>}
-                                </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">聯絡信箱</label>
+                                        <input
+                                            type="email"
+                                            name="email"
+                                            value={editFormData.email}
+                                            onChange={handleEditFormChange}
+                                            placeholder="聯絡信箱"
+                                            className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.email ? 'border-red-500' : ''}`}
+                                        />
+                                        {editFormErrors.email && <p className="text-red-500 text-sm mt-1">{editFormErrors.email}</p>}
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">聯絡電話</label>
-                                    <input
-                                        type="tel"
-                                        name="phone"
-                                        value={editFormData.phone}
-                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
-                                        placeholder="聯絡電話"
-                                        className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.phone ? 'border-red-500' : ''}`}
-                                    />
-                                    {editFormErrors.phone && <p className="text-red-500 text-sm mt-1">{editFormErrors.phone}</p>}
-                                </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">聯絡電話</label>
+                                        <input
+                                            type="tel"
+                                            name="phone"
+                                            value={editFormData.phone}
+                                            onChange={handleEditFormChange}
+                                            placeholder="聯絡電話"
+                                            className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.phone ? 'border-red-500' : ''}`}
+                                        />
+                                        {editFormErrors.phone && <p className="text-red-500 text-sm mt-1">{editFormErrors.phone}</p>}
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">婚禮日期時間</label>
-                                    <input
-                                        type="datetime-local"
-                                        name="wedding_date" // 注意：這裡的 name 依然用 wedding_date，但在 state 中會是 datetime-local 字串
-                                        value={editFormData.wedding_date}
-                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
-                                        className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.wedding_date ? 'border-red-500' : ''}`}
-                                    />
-                                    {editFormErrors.wedding_date && <p className="text-red-500 text-sm mt-1">{editFormErrors.wedding_date}</p>}
-                                </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">婚禮日期時間</label>
+                                        <input
+                                            type="datetime-local"
+                                            name="wedding_date" // 注意：這裡的 name 依然用 wedding_date，但在 state 中會是 datetime-local 字串
+                                            value={editFormData.wedding_date}
+                                            onChange={handleEditFormChange}
+                                            className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.wedding_date ? 'border-red-500' : ''}`}
+                                        />
+                                        {editFormErrors.wedding_date && <p className="text-red-500 text-sm mt-1">{editFormErrors.wedding_date}</p>}
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">婚禮地點</label>
-                                    <input
-                                        type="text"
-                                        name="wedding_location"
-                                        value={editFormData.wedding_location}
-                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
-                                        placeholder="婚禮地點"
-                                        className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.wedding_location ? 'border-red-500' : ''}`}
-                                    />
-                                    {editFormErrors.wedding_location && <p className="text-red-500 text-sm mt-1">{editFormErrors.wedding_location}</p>}
-                                </div>
-
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Google 試算表連結</label>
-                                    <input
-                                        type="text"
-                                        name="form_link" // 注意：這裡的 name 依然用 form_link，但在 state 中會是 Google Sheet 連結
-                                        value={editFormData.form_link}
-                                        onChange={handleEditFormChange} // *** 這裡使用 handleEditFormChange ***
-                                        placeholder="google 試算表連結"
-                                        className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.form_link ? 'border-red-500' : ''}`}
-                                    />
-                                    {editFormErrors.form_link && <p className="text-red-500 text-sm mt-1">{editFormErrors.form_link}</p>}
-                                </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">婚禮地點</label>
+                                        <input
+                                            type="text"
+                                            name="wedding_location"
+                                            value={editFormData.wedding_location}
+                                            onChange={handleEditFormChange}
+                                            placeholder="婚禮地點"
+                                            className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.wedding_location ? 'border-red-500' : ''}`}
+                                        />
+                                        {editFormErrors.wedding_location && <p className="text-red-500 text-sm mt-1">{editFormErrors.wedding_location}</p>}
+                                    </div>
 
 
-                                {editFormErrors.submit && <p className="text-red-600 text-sm mt-2 text-center">{editFormErrors.submit}</p>}
-                                <div className="flex gap-4 mt-2 justify-end">
-                                    <button
-                                        onClick={handleSaveEdit} // *** 這裡使用 handleSaveEdit ***
-                                        className="bg-blue-600 text-white px-4 py-2 rounded-md shadow hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        disabled={isSaving} // 儲存中時禁用按鈕
-                                    >
-                                        {isSaving ? '儲存中...' : '儲存變更'}
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setShowEditForm(false);
-                                            setEditFormErrors({}); // 關閉表單時清除錯誤訊息
-                                            // 不重置 editFormData，以便下次打開時保留上次打開時的資料
-                                        }}
-                                        className="bg-gray-500 text-white px-4 py-2 rounded-md shadow hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        disabled={isSaving} // 儲存中時禁用按鈕
-                                    >
-                                        取消
-                                    </button>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Google 試算表連結</label>
+                                        <input
+                                            type="text"
+                                            name="form_link" // 注意：這裡的 name 依然用 form_link，但在 state 中會是 Google Sheet 連結
+                                            value={editFormData.form_link}
+                                            onChange={handleEditFormChange}
+                                            placeholder="google 試算表連結"
+                                            className={`border border-gray-300 rounded-md p-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${editFormErrors.form_link ? 'border-red-500' : ''}`}
+                                        />
+                                        {editFormErrors.form_link && <p className="text-red-500 text-sm mt-1">{editFormErrors.form_link}</p>}
+                                    </div>
+
+
+                                    {editFormErrors.submit && <p className="text-red-600 text-sm mt-2 text-center">{editFormErrors.submit}</p>}
+                                    <div className="flex gap-4 mt-2 justify-end">
+                                        <button
+                                            onClick={handleSaveEdit}
+                                            className="bg-blue-600 text-white px-4 py-2 rounded-md shadow hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={isSaving} // 儲存中時禁用按鈕
+                                        >
+                                            {isSaving ? '儲存中...' : '儲存變更'}
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowEditForm(false);
+                                                setEditFormErrors({}); // 關閉表單時清除錯誤訊息
+                                                // 不重置 editFormData，以便下次打開時保留上次打開時的資料
+                                            }}
+                                            className="bg-gray-500 text-white px-4 py-2 rounded-md shadow hover:bg-gray-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={isSaving} // 儲存中時禁用按鈕
+                                        >
+                                            取消
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )
+                }
 
 
-                {sheetData && sheetData.length > 0 ? (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse table-auto">
-                            <thead className="bg-gray-200 text-gray-700">
-                                <tr>
-                                    <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客 ID</th>
-                                    <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客姓名</th>
-                                    <th className="py-4 px-6 border-b border-gray-300 text-lg">電子郵件地址</th>
-                                    <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">是否寄送</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {sheetData.map((row) => (
-                                    <tr key={row.id} className="hover:bg-gray-100">
-                                        <td className="py-3 px-6 border-b border-gray-300 text-center">{row.google_sheet_guest_id || '未同步'}</td>
-                                        <td className="py-3 px-6 border-b border-gray-300 text-center">{row.guest_name}</td>
-                                        <td className="py-3 px-6 border-b border-gray-300 text-lg break-all">{row.email}</td>
-                                        <td className="py-3 px-6 border-b border-gray-300 text-lg text-center">
-                                            {row.is_sent ? "已寄送" : "未寄送"}
-                                        </td>
+                {
+                    sheetData && sheetData.length > 0 ? (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse table-auto">
+                                <thead className="bg-gray-200 text-gray-700">
+                                    <tr>
+                                        <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客 ID</th>
+                                        <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客姓名</th>
+                                        <th className="py-4 px-6 border-b border-gray-300 text-lg">電子郵件地址</th>
+                                        <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">是否寄送</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                ) : (
-                    <p className="text-center text-gray-500 mt-4">目前沒有賓客資料。</p>
-                )}
-            </div>
-        </div>
+                                </thead>
+                                <tbody>
+                                    {sheetData.map((row) => (
+                                        <tr key={row.id} className="hover:bg-gray-100">
+                                            <td className="py-3 px-6 border-b border-gray-300 text-center">{row.google_sheet_guest_id || '未同步'}</td>
+                                            <td className="py-3 px-6 border-b border-gray-300 text-center">{row.guest_name}</td>
+                                            <td className="py-3 px-6 border-b border-gray-300 text-lg break-all">{row.email}</td>
+                                            <td className="py-3 px-6 border-b border-gray-300 text-lg text-center">
+                                                {row.is_sent ? "已寄送" : "未寄送"}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <p className="text-center text-gray-500 mt-4">目前沒有賓客資料。</p>
+                    )
+                }
+            </div >
+        </div >
     );
 }
 

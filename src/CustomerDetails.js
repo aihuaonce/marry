@@ -32,6 +32,9 @@ function CustomerDetails() {
     const [editFormErrors, setEditFormErrors] = useState({});
     const [isSaving, setIsSaving] = useState(false); // 追蹤是否正在儲存
 
+    // *** 新增狀態來管理提示訊息 { message: '...', type: 'success' | 'error' | null } ***
+    const [notification, setNotification] = useState(null);
+
 
     // 獨立函式用於抓取賓客資料，使用 useCallback進行 memoize
     const fetchSheetData = useCallback(async () => {
@@ -40,6 +43,7 @@ function CustomerDetails() {
             if (!sheetDataRes.ok) {
                 setSheetData([]);
                 console.warn("抓取賓客資料 API 返回非 OK 狀態:", sheetDataRes.status);
+                // 可以考慮在這裡設定一個錯誤通知，但由於是背景抓取，可能不需要打擾使用者
                 return;
             }
             const sheetData = await sheetDataRes.json();
@@ -48,11 +52,13 @@ function CustomerDetails() {
             } else {
                 setSheetData([]);
                 console.warn("抓取賓客資料 API 返回的格式非陣列:", sheetData);
+                // 可以考慮在這裡設定一個錯誤通知
             }
 
         } catch (err) {
             console.error("抓取賓客資料錯誤:", err);
             setSheetData([]);
+            // 可以考慮在這裡設定一個錯誤通知
         }
     }, [id]);
 
@@ -96,6 +102,8 @@ function CustomerDetails() {
                 setError(err.message || "載入資料失敗。");
                 setCustomer(null);
                 setSheetData([]);
+                // *** 使用 setNotification 顯示錯誤訊息 ***
+                setNotification({ message: err.message || "載入資料失敗。", type: "error" });
             } finally {
                 setLoading(false);
             }
@@ -103,6 +111,19 @@ function CustomerDetails() {
 
         fetchCustomerData();
     }, [id, fetchSheetData]);
+
+
+    // *** 使用 useEffect 來自動隱藏提示訊息 ***
+    useEffect(() => {
+        if (notification) {
+            const timer = setTimeout(() => {
+                setNotification(null);
+            }, 5000); // 5 秒後隱藏提示訊息
+
+            return () => clearTimeout(timer); // 在 notification 改變或元件卸載時清除 timer
+        }
+    }, [notification]);
+
 
     // 函式用於更新單個賓客的寄送狀態
     const updateGuestStatus = async (guestId, status) => {
@@ -118,6 +139,7 @@ function CustomerDetails() {
             if (!res.ok) {
                 const errorText = await res.text();
                 console.error(`更新賓客 ${guestId} 狀態失敗: ${res.status} ${res.statusText} - ${errorText}`);
+                // *** 不在這裡設定通知，統一在 handleSendEmail 中處理狀態更新的結果 ***
                 return false;
             } else {
                 console.log(`賓客 ${guestId} 狀態更新成功`);
@@ -125,6 +147,7 @@ function CustomerDetails() {
             }
         } catch (err) {
             console.error(`呼叫更新狀態 API 錯誤 (賓客 ${guestId}):`, err);
+            // *** 不在這裡設定通知，統一在 handleSendEmail 中處理狀態更新的結果 ***
             return false;
         }
     };
@@ -132,7 +155,7 @@ function CustomerDetails() {
 
     // ==== 寄送請帖函式，加入確認步驟 ====
     const handleSendEmail = async () => {
-        // 加入確認對話框
+        // 保留 window.confirm 因為這是需要使用者明確選擇的動作
         const isConfirmed = window.confirm("確定要向所有未寄送且有有效電子郵件地址的賓客寄送請帖嗎？");
         if (!isConfirmed) {
             return; // 如果使用者取消，則停止執行
@@ -140,19 +163,22 @@ function CustomerDetails() {
 
 
         if (!sheetData || sheetData.length === 0) {
-            alert("沒有賓客資料，無法寄送邀請函。");
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "沒有賓客資料，無法寄送邀請函。", type: "error" });
             return;
         }
 
         if (!customer) {
-            alert("客戶資料尚未載入，無法寄送。");
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "客戶資料尚未載入，無法寄送。", type: "error" });
             return;
         }
 
         const guestsToSend = sheetData.filter(guest => !guest.is_sent && guest.email); // 只寄送未寄送且有 Email 的賓客
 
         if (guestsToSend.length === 0) {
-            alert("所有賓客都已寄送過請帖，或沒有有效的電子郵件地址。");
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "所有賓客都已寄送過請帖，或沒有有效的電子郵件地址。", type: "info" }); // 可以用 info 或 success
             return;
         }
 
@@ -192,7 +218,8 @@ function CustomerDetails() {
                 throw new Error(`寄信 API 請求失敗：${res.status} ${res.statusText} - ${errorText}`);
             }
 
-            alert("請帖寄送請求已發送！正在嘗試更新賓客狀態。");
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "請帖寄送請求已發送！正在嘗試更新賓客狀態。", type: "success" });
 
             const updatePromises = guestsToSend.map(guest => updateGuestStatus(guest.id, 1));
             const updateResults = await Promise.all(updatePromises);
@@ -200,9 +227,11 @@ function CustomerDetails() {
             const failedUpdates = guestsToSend.filter((_, index) => !updateResults[index]);
             if (failedUpdates.length > 0) {
                 console.error("以下賓客狀態更新失敗:", failedUpdates);
-                alert(`請帖寄送請求已發送，但有 ${failedUpdates.length} 位賓客狀態更新失敗。`);
+                // *** 替換 alert 為 setNotification ***
+                setNotification({ message: `請帖寄送請求已發送，但有 ${failedUpdates.length} 位賓客狀態更新失敗。`, type: "warning" }); // 使用 warning 類型
             } else {
-                alert("請帖寄送成功且賓客狀態已更新！");
+                // *** 替換 alert 為 setNotification ***
+                setNotification({ message: "請帖寄送成功且賓客狀態已更新！", type: "success" });
             }
 
 
@@ -211,7 +240,8 @@ function CustomerDetails() {
 
         } catch (err) {
             console.error("寄信錯誤:", err);
-            alert("寄信失敗：" + err.message);
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "寄信失敗：" + err.message, type: "error" });
         } finally {
             setIsSendingEmail(false);
         }
@@ -220,7 +250,8 @@ function CustomerDetails() {
 
     const handleSyncData = async () => {
         if (!customer) {
-            alert("客戶資料尚未載入，無法同步。");
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "客戶資料尚未載入，無法同步。", type: "error" });
             return;
         }
 
@@ -238,13 +269,16 @@ function CustomerDetails() {
                 throw new Error(errorMessage);
             }
 
-            alert(data.message);
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: data.message, type: "success" });
+
 
             await fetchSheetData();
 
         } catch (err) {
             console.error("同步資料錯誤:", err);
-            alert("同步資料失敗：" + err.message);
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "同步資料失敗：" + err.message, type: "error" });
         } finally {
             setIsSyncing(false);
         }
@@ -349,7 +383,9 @@ function CustomerDetails() {
                 throw new Error(errorMessage);
             }
 
-            alert("客戶資料更新成功！");
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "客戶資料更新成功！", type: "success" });
+
             setShowEditForm(false); // 關閉 Modal
             setEditFormErrors({}); // 清空錯誤訊息
 
@@ -387,6 +423,8 @@ function CustomerDetails() {
         } catch (err) {
             console.error("更新客戶資料錯誤：", err);
             setEditFormErrors({ ...editFormErrors, submit: err.message || "更新失敗，請稍後再試" });
+            // *** 替換 alert 為 setNotification ***
+            setNotification({ message: "更新客戶資料失敗：" + err.message, type: "error" });
         } finally {
             setIsSaving(false); // 儲存結束，設置狀態為 false
         }
@@ -397,6 +435,12 @@ function CustomerDetails() {
 
     return (
         <div className="min-h-screen bg-gray-100 py-8 px-4">
+            {notification && (
+                <div className={`fixed top-4 right-4 z-50 p-4 rounded-md shadow-md text-white ${notification.type === 'success' ? 'bg-green-500' : notification.type === 'error' ? 'bg-red-500' : 'bg-blue-500'}`}>
+                    {notification.message}
+                </div>
+            )}
+
             <div className="max-w-4xl mx-auto bg-white shadow-lg rounded-lg p-8 relative">
 
                 <button
@@ -416,8 +460,8 @@ function CustomerDetails() {
                         <span>{isCustomerInfoCollapsed ? '▶' : '▼'}</span>
                     </button>
 
-                    {!isCustomerInfoCollapsed && (
-                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-lg text-gray-700">
+                    {!isCustomerInfoCollapsed && customer && (
+                        <div div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-lg text-gray-700">
                             <div className="md:col-span-2 flex flex-wrap gap-x-8">
                                 <p>
                                     <span className="font-semibold">新郎:</span> {customer.groom_name}
@@ -463,51 +507,54 @@ function CustomerDetails() {
                     )}
                 </div>
 
-                <div className="flex justify-center gap-4 mb-6 flex-wrap">
-                    <button
-                        onClick={handleSyncData}
-                        className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition duration-300 ease-in-out disabled:opacity-50"
-                        disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在打開編輯表單或儲存時也禁用其他按鈕
-                    >
-                        {isSyncing ? '同步中...' : '同步資料庫'}
-                    </button>
+                {customer && (
+                    <div className="flex justify-center gap-4 mb-6 flex-wrap">
+                        <button
+                            onClick={handleSyncData}
+                            className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition duration-300 ease-in-out disabled:opacity-50"
+                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在打開編輯表單或儲存時也禁用其他按鈕
+                        >
+                            {isSyncing ? '同步中...' : '同步資料庫'}
+                        </button>
 
-                    <button
-                        onClick={() => {
-                            // 打開編輯 Modal，並使用當前客戶資料初始化表單
-                            if (customer) {
-                                const initialEditData = {
-                                    groom_name: customer.groom_name || "",
-                                    bride_name: customer.bride_name || "",
-                                    email: customer.email || "",
-                                    phone: customer.phone || "",
-                                    // 將日期和時間合併為YYYY-MM-DDTHH:mm 格式 (datetime-local 所需)
-                                    // 處理日期和時間可能為 null 的情況
-                                    wedding_date: (customer.wedding_date && customer.wedding_time)
-                                        ? `${moment(customer.wedding_date).format('YYYY-MM-DD')}T${customer.wedding_time.substring(0, 5)}` // 取 HH:mm 部分
-                                        : customer.wedding_date ? moment(customer.wedding_date).format('YYYY-MM-DD') : '', // 如果只有日期
-                                    wedding_location: customer.wedding_location || "",
-                                    form_link: customer.google_sheet_link || "", // 注意欄位名稱對應
-                                };
-                                setEditFormData(initialEditData);
-                                setEditFormErrors({}); // 打開表單時清除錯誤
-                                setShowEditForm(true);
-                            }
-                        }}
-                        className="bg-yellow-600 text-white px-6 py-2 rounded hover:bg-yellow-700 transition duration-300 ease-in-out disabled:opacity-50"
-                        disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在載入、寄信、同步或已打開編輯表單或儲存時禁用
-                    >
-                        編輯客戶資訊
-                    </button>
+                        <button
+                            onClick={() => {
+                                // 打開編輯 Modal，並使用當前客戶資料初始化表單
+                                if (customer) {
+                                    const initialEditData = {
+                                        groom_name: customer.groom_name || "",
+                                        bride_name: customer.bride_name || "",
+                                        email: customer.email || "",
+                                        phone: customer.phone || "",
+                                        // 將日期和時間合併為YYYY-MM-DDTHH:mm 格式 (datetime-local 所需)
+                                        // 處理日期和時間可能為 null 的情況
+                                        wedding_date: (customer.wedding_date && customer.wedding_time)
+                                            ? `${moment(customer.wedding_date).format('YYYY-MM-DD')}T${customer.wedding_time.substring(0, 5)}` // 取 HH:mm 部分
+                                            : customer.wedding_date ? moment(customer.wedding_date).format('YYYY-MM-DD') : '', // 如果只有日期
+                                        wedding_location: customer.wedding_location || "",
+                                        form_link: customer.google_sheet_link || "", // 注意欄位名稱對應
+                                    };
+                                    setEditFormData(initialEditData);
+                                    setEditFormErrors({}); // 打開表單時清除錯誤
+                                    setShowEditForm(true);
+                                }
+                            }}
+                            className="bg-yellow-600 text-white px-6 py-2 rounded hover:bg-yellow-700 transition duration-300 ease-in-out disabled:opacity-50"
+                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在載入、寄信、同步或已打開編輯表單或儲存時禁用
+                        >
+                            編輯客戶資訊
+                        </button>
 
-                    <button
-                        onClick={handleSendEmail} // 此函式內部已加入確認步驟
-                        className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition duration-300 ease-in-out disabled:opacity-50"
-                        disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在打開編輯表單或儲存時也禁用
-                    >
-                        {isSendingEmail ? '寄送中...' : '寄送請帖'}
-                    </button>
-                </div>
+                        <button
+                            onClick={handleSendEmail} // 此函式內部已加入確認步驟 (window.confirm)
+                            className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition duration-300 ease-in-out disabled:opacity-50"
+                            disabled={loading || isSendingEmail || isSyncing || showEditForm || isSaving} // 在打開編輯表單或儲存時也禁用
+                        >
+                            {isSendingEmail ? '寄送中...' : '寄送請帖'}
+                        </button>
+                    </div>
+                )}
+
 
                 {showEditForm && (
                     <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
@@ -647,7 +694,7 @@ function CustomerDetails() {
                                 <tr>
                                     <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客 ID</th>
                                     <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">賓客姓名</th>
-                                    <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">電子郵件地址</th>
+                                    <th className="py-4 px-6 border-b border-gray-300 text-lg text-center">電子郵件地址</th>
                                     <th className="py-4 px-6 border-b border-gray-300 text-lg text-center font-semibold">是否寄送</th>
                                 </tr>
                             </thead>
@@ -656,7 +703,7 @@ function CustomerDetails() {
                                     <tr key={row.id} className="hover:bg-gray-100">
                                         <td className="py-3 px-6 border-b border-gray-300 text-center">{row.google_sheet_guest_id || '未同步'}</td>
                                         <td className="py-3 px-6 border-b border-gray-300 text-center">{row.guest_name}</td>
-                                        <td className="py-3 px-6 border-b border-gray-300 text-lg text-center">{row.email}</td>
+                                        <td className="py-3 px-6 border-b border-gray-300 text-lg break-all">{row.email}</td>
                                         <td className="py-3 px-6 border-b border-gray-300 text-lg text-center">
                                             {row.is_sent ? "已寄送" : "未寄送"}
                                         </td>
@@ -669,7 +716,7 @@ function CustomerDetails() {
                     <p className="text-center text-gray-500 mt-4">目前沒有賓客資料。</p>
                 )}
             </div>
-        </div>
+        </div >
     );
 }
 

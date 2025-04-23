@@ -310,6 +310,38 @@ app.put("/customers/:id", (req, res) => {
     );
 });
 
+// **** 新增 API：更新客戶狀態 (使用回呼函式) ****
+app.put("/customers/:id/status", (req, res) => { // <--- 移除 async 關鍵字
+    console.log('Received PUT /customers/:id/status request', req.params.id);
+    const customerId = req.params.id;
+    const { status } = req.body;
+
+    // 驗證 status 是否為 'open' 或 'closed'
+    if (!status || (status !== 'open' && status !== 'closed')) {
+        return res.status(400).json({ message: "無效的狀態值，必須是 'open' 或 'closed'" });
+    }
+
+    // 驗證 ID 是否為數字
+    if (!validator.isInt(String(customerId))) {
+        return res.status(400).json({ message: "無效的客戶 ID" });
+    }
+
+    const query = "UPDATE customers SET status = ? WHERE id = ?";
+    pool.query(query, [status, customerId], (err, results) => { // <--- 改為回呼函式
+        if (err) {
+            console.error(`更新客戶 ${customerId} 狀態錯誤:`, err);
+            return res.status(500).json({ message: "更新狀態失敗，請稍後再試" });
+        }
+
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ message: `找不到 ID 為 ${customerId} 的客戶資料` });
+        }
+
+        console.log(`客戶 ${customerId} 狀態已更新為 ${status}`);
+        res.status(200).json({ message: "客戶狀態更新成功", customerId: customerId, status: status });
+    }); // <--- 結束 pool.query 呼叫
+});
+
 // ==== 新增 DELETE /customers/:id 端點 (刪除客戶資料) ====
 app.delete("/customers/:id", (req, res) => {
     const customerId = req.params.id;
